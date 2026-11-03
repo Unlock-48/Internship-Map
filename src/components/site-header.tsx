@@ -23,7 +23,7 @@ export function SiteHeader() {
   return <header className="topbar">
     <Link className="brand" href="/">
       {logoUrl ? <img className="brand-logo" src={logoUrl} alt="โลโก้เว็บไซต์" /> : <span className="brand-mark">CM</span>}
-      <span>Chiang Mai Internship Map</span>
+      <span>INTERNSHIP-MAP</span>
     </Link>
     <nav className="nav"><Link href="/submit">เสนอข้อมูล</Link><Link href="/report">แจ้งข้อมูลผิด</Link><button className={`theme-option ${theme === "dark" ? "active" : ""}`} type="button" onClick={() => changeTheme("dark")} aria-pressed={theme === "dark"}>โหมดมืด</button><button className={`theme-option ${theme === "light" ? "active" : ""}`} type="button" onClick={() => changeTheme("light")} aria-pressed={theme === "light"}>โหมดสว่าง</button><Link href="/admin">{isAdmin ? "Admin" : "Login"}</Link></nav>
   </header>;

@@ -71,7 +71,7 @@ export default function HomePage() {
         </section>
         <MapView companies={visibleCompanies} selectedCompanyId={selected} onSelect={setSelected} />
       </main>
-      <footer className="site-footer"><span>Chiang Mai Internship Map</span><span>ข้อมูลเพื่อการค้นหาเบื้องต้น · ตรวจสอบข้อมูลล่าสุดก่อนสมัคร</span></footer>
+      <footer className="site-footer"><span>INTERNSHIP-MAP</span><span>ข้อมูลเพื่อการค้นหาเบื้องต้น · ตรวจสอบข้อมูลล่าสุดก่อนสมัคร</span></footer>
     </div>
   );
 }
