@@ -8,6 +8,9 @@ export const metadata = { title: "Chiang Mai Internship Map", description: "เนเ
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="th">
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: `try{var t=localStorage.getItem("site-theme");if(t==="dark")document.documentElement.dataset.theme="dark"}catch(e){}` }} />
+      </head>
       <body>
       <SiteHeader />
       {children}
