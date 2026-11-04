@@ -3,13 +3,17 @@ import { createClient } from "@supabase/supabase-js";
 import { getAdminUser } from "@/lib/supabase/auth";
 import { inferJobCategory } from "@/lib/job-category";
 import { normalizeOrganizationType } from "@/lib/organization-type";
-import { extractGoogleMapsCoordinates } from "@/lib/google-maps";
+import { resolveGoogleMapsCoordinates } from "@/lib/google-maps";
 
 export const runtime = "nodejs";
 
 type CompanyInput = {
   id?: string;
   internshipId?: string;
+  universityId?: string;
+  academicUnitId?: string;
+  allUniversities?: boolean;
+  clearEmptyFields?: boolean;
   companyName?: string;
   businessType?: string;
   organizationType?: string;
@@ -56,7 +60,7 @@ export async function GET() {
   if (!await getAdminUser()) return NextResponse.json({ error: "ต้องเข้าสู่ระบบ Admin" }, { status: 401 });
   try {
     const { data, error } = await client().from("companies")
-      .select("id,name,slug,business_type,organization_type,description,address,district,province,latitude,longitude,website,facebook,google_maps_url,phone,email,coordinator_name,coordinator_title,coordinator_phone,authorized_name,authorized_title,business_hours,advisor_recommendation,advisor_name,status,created_at,updated_at,internships(id,title,description,job_category,status,created_at,updated_at)")
+      .select("id,name,slug,business_type,organization_type,description,address,district,province,latitude,longitude,website,facebook,google_maps_url,phone,email,coordinator_name,coordinator_title,coordinator_phone,authorized_name,authorized_title,business_hours,advisor_recommendation,advisor_name,status,created_at,updated_at,internships(id,title,description,job_category,status,academic_unit_id,all_universities,created_at,updated_at,academic_units!internships_academic_unit_id_fkey(id,university_id,name,universities(id,name)))")
       .order("created_at", { ascending: false });
     if (error) throw error;
     const companies = (data ?? []).map((company) => ({
@@ -76,9 +80,27 @@ export async function POST(request: NextRequest) {
     const body = await request.json() as CompanyInput;
     const companyName = text(body.companyName);
     if (!companyName) return NextResponse.json({ error: "กรุณาระบุชื่อบริษัท" }, { status: 400 });
+    const positionTitle = text(body.positionTitle);
+    if (!positionTitle) return NextResponse.json({ error: "กรุณาระบุตำแหน่งที่รับ" }, { status: 400 });
     const supabase = client();
+    const universityId = text(body.universityId);
+    const academicUnitId = text(body.academicUnitId);
+    if (!universityId || !academicUnitId) {
+      return NextResponse.json({ error: "กรุณาเลือกมหาวิทยาลัยและคณะ/ภาควิชา/สาขา" }, { status: 400 });
+    }
+    const { data: academicUnit, error: academicUnitError } = await supabase
+      .from("academic_units")
+      .select("id,university_id")
+      .eq("id", academicUnitId)
+      .eq("university_id", universityId)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (academicUnitError) throw academicUnitError;
+    if (!academicUnit) {
+      return NextResponse.json({ error: "หน่วยงานที่เลือกไม่อยู่ในมหาวิทยาลัยนี้ หรือถูกปิดใช้งาน" }, { status: 400 });
+    }
     const googleMapsUrl = text(body.googleMapsUrl);
-    const linkCoordinates = extractGoogleMapsCoordinates(googleMapsUrl);
+    const linkCoordinates = await resolveGoogleMapsCoordinates(googleMapsUrl);
     const latitude = linkCoordinates?.latitude ?? (text(body.latitude) ? Number(body.latitude) : null);
     const longitude = linkCoordinates?.longitude ?? (text(body.longitude) ? Number(body.longitude) : null);
     const companyData = {
@@ -96,6 +118,7 @@ export async function POST(request: NextRequest) {
       google_maps_url: googleMapsUrl || null,
       phone: text(body.phone) || null,
       email: text(body.email) || null,
+      status: "active" as const,
       coordinator_name: text(body.coordinatorName) || null,
       coordinator_title: text(body.coordinatorTitle) || null,
       coordinator_phone: text(body.coordinatorPhone) || null,
@@ -107,21 +130,55 @@ export async function POST(request: NextRequest) {
       updated_at: new Date().toISOString()
     };
     let companyId = body.id;
+    let hasCoordinates = latitude != null && longitude != null;
     if (companyId) {
-      const { error } = await supabase.from("companies").update(companyData).eq("id", companyId);
+      const { data: existingCompany, error: existingCompanyError } = await supabase
+        .from("companies")
+        .select("business_type,description,address,district,province,latitude,longitude,website,facebook,google_maps_url,phone,email,coordinator_name,coordinator_title,coordinator_phone,authorized_name,authorized_title,business_hours,advisor_recommendation,advisor_name,status")
+        .eq("id", companyId)
+        .maybeSingle();
+      if (existingCompanyError) throw existingCompanyError;
+      if (!existingCompany) return NextResponse.json({ error: "ไม่พบบริษัทที่ต้องการแก้ไข" }, { status: 404 });
+      const updateData = {
+        ...(body.clearEmptyFields ? companyData : {
+          ...companyData,
+          business_type: companyData.business_type ?? existingCompany.business_type,
+          description: companyData.description ?? existingCompany.description,
+          address: companyData.address || existingCompany.address,
+          district: companyData.district || existingCompany.district,
+          province: companyData.province || existingCompany.province,
+          latitude: companyData.latitude ?? existingCompany.latitude,
+          longitude: companyData.longitude ?? existingCompany.longitude,
+          website: companyData.website ?? existingCompany.website,
+          facebook: companyData.facebook ?? existingCompany.facebook,
+          google_maps_url: companyData.google_maps_url ?? existingCompany.google_maps_url,
+          phone: companyData.phone ?? existingCompany.phone,
+          email: companyData.email ?? existingCompany.email,
+          coordinator_name: companyData.coordinator_name ?? existingCompany.coordinator_name,
+          coordinator_title: companyData.coordinator_title ?? existingCompany.coordinator_title,
+          coordinator_phone: companyData.coordinator_phone ?? existingCompany.coordinator_phone,
+          authorized_name: companyData.authorized_name ?? existingCompany.authorized_name,
+          authorized_title: companyData.authorized_title ?? existingCompany.authorized_title,
+          business_hours: companyData.business_hours ?? existingCompany.business_hours,
+          advisor_recommendation: companyData.advisor_recommendation ?? existingCompany.advisor_recommendation,
+          advisor_name: companyData.advisor_name ?? existingCompany.advisor_name
+        }),
+        status: existingCompany.status
+      };
+      hasCoordinates = updateData.latitude != null && updateData.longitude != null;
+      const { error } = await supabase.from("companies").update(updateData).eq("id", companyId);
       if (error) throw error;
     } else {
-      const { data, error } = await supabase.from("companies").insert({ ...companyData, slug: slug(companyName), status: "inactive" as const, last_verified_at: null }).select("id").single();
+      const { data, error } = await supabase.from("companies").insert({ ...companyData, slug: slug(companyName), last_verified_at: null }).select("id").single();
       if (error) throw error;
       companyId = data.id;
     }
 
-    const positionTitle = text(body.positionTitle);
     if (positionTitle) {
       if (body.id) {
         const { data: existingInternship, error: findInternshipError } = await supabase
           .from("internships")
-          .select("id")
+          .select("id,description,status")
           .eq("company_id", companyId)
           .eq(body.internshipId ? "id" : "company_id", body.internshipId ?? companyId)
           .order("created_at", { ascending: true })
@@ -131,32 +188,58 @@ export async function POST(request: NextRequest) {
         if (existingInternship) {
           const { error } = await supabase.from("internships").update({
             title: positionTitle,
-            description: text(body.jobDescription, "ไม่ระบุ"),
+            description: body.clearEmptyFields ? text(body.jobDescription) : text(body.jobDescription) || existingInternship.description,
             job_category: text(body.jobCategory) || inferJobCategory(positionTitle, text(body.jobDescription)),
+            academic_unit_id: academicUnit.id,
+            all_universities: body.allUniversities === true,
+            status: existingInternship.status,
             updated_at: new Date().toISOString()
           }).eq("id", existingInternship.id);
           if (error) throw error;
+          const { error: clearEligibleUnitsError } = await supabase.from("internship_eligible_units").delete().eq("internship_id", existingInternship.id);
+          if (clearEligibleUnitsError) throw clearEligibleUnitsError;
+          if (body.allUniversities !== true) {
+            const { error: eligibleUnitError } = await supabase.from("internship_eligible_units").upsert({
+              internship_id: existingInternship.id,
+              academic_unit_id: academicUnit.id
+            }, { onConflict: "internship_id,academic_unit_id" });
+            if (eligibleUnitError) throw eligibleUnitError;
+          }
         } else {
-          const { error } = await supabase.from("internships").insert({
-            company_id: companyId, title: positionTitle, description: text(body.jobDescription, "ไม่ระบุ"),
+          const { data: createdInternship, error } = await supabase.from("internships").insert({
+            company_id: companyId, academic_unit_id: academicUnit.id, title: positionTitle, description: text(body.jobDescription, "ไม่ระบุ"),
             job_category: text(body.jobCategory) || inferJobCategory(positionTitle, text(body.jobDescription)),
-            status: "draft", work_mode: "undisclosed", allowance_type: "undisclosed",
-            all_universities: true, last_verified_at: null
-          });
+            status: "open", work_mode: "undisclosed", allowance_type: "undisclosed",
+            all_universities: body.allUniversities === true, last_verified_at: null
+          }).select("id").single();
           if (error) throw error;
+          if (body.allUniversities !== true) {
+            const { error: eligibleUnitError } = await supabase.from("internship_eligible_units").upsert({
+              internship_id: createdInternship.id,
+              academic_unit_id: academicUnit.id
+            }, { onConflict: "internship_id,academic_unit_id" });
+            if (eligibleUnitError) throw eligibleUnitError;
+          }
         }
       } else {
-        const { error } = await supabase.from("internships").insert({
-          company_id: companyId, title: positionTitle, description: text(body.jobDescription, "ไม่ระบุ"),
+        const { data: createdInternship, error } = await supabase.from("internships").insert({
+          company_id: companyId, academic_unit_id: academicUnit.id, title: positionTitle, description: text(body.jobDescription, "ไม่ระบุ"),
           job_category: text(body.jobCategory) || inferJobCategory(positionTitle, text(body.jobDescription)),
-          status: "draft", work_mode: "undisclosed", allowance_type: "undisclosed",
-          all_universities: true, last_verified_at: null
-        });
+          status: "open", work_mode: "undisclosed", allowance_type: "undisclosed",
+          all_universities: body.allUniversities === true, last_verified_at: null
+        }).select("id").single();
         if (error) throw error;
+        if (body.allUniversities !== true) {
+          const { error: eligibleUnitError } = await supabase.from("internship_eligible_units").upsert({
+            internship_id: createdInternship.id,
+            academic_unit_id: academicUnit.id
+          }, { onConflict: "internship_id,academic_unit_id" });
+          if (eligibleUnitError) throw eligibleUnitError;
+        }
       }
     }
     await supabase.from("audit_logs").insert({ actor_id: user.id, action: body.id ? "update_company" : "create_company", entity_type: "company", entity_id: companyId });
-    return NextResponse.json({ ok: true, id: companyId }, { status: body.id ? 200 : 201 });
+    return NextResponse.json({ ok: true, id: companyId, hasCoordinates }, { status: body.id ? 200 : 201 });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "บันทึกข้อมูลไม่สำเร็จ" }, { status: 500 });
   }

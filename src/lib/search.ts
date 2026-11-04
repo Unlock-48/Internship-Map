@@ -1,5 +1,7 @@
 import { InternshipResult, WorkMode } from "@/types/domain";
 
+export const UNKNOWN_PROVINCE_FILTER = "__unknown_province__";
+
 export type SearchParams = {
   q?: string;
   workModes?: WorkMode[];
@@ -21,7 +23,13 @@ export function searchInternships(items: InternshipResult[], params: SearchParam
     if (params.workModes?.length && !params.workModes.includes(item.workMode)) return false;
     if (params.organizationTypes?.length && !params.organizationTypes.includes(item.company.organizationType)) return false;
     if (params.jobCategories?.length && !params.jobCategories.includes(item.jobCategory)) return false;
-    if (params.provinces?.length && !params.provinces.includes(item.company.province)) return false;
+    if (params.provinces?.length) {
+      const province = item.company.province?.trim();
+      const matchesProvince = params.provinces.some((selectedProvince) => selectedProvince === UNKNOWN_PROVINCE_FILTER
+        ? !province || ["ไม่ระบุ", "ไม่ทราบจังหวัด"].includes(province)
+        : selectedProvince === province);
+      if (!matchesProvince) return false;
+    }
     if (params.district && item.company.district !== params.district) return false;
     if (params.paidOnly && item.allowanceType === "unpaid") return false;
     if (params.bbox) {

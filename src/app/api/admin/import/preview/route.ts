@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseInternshipWorkbook } from "@/lib/import-workbook";
+import { getAdminUser } from "@/lib/supabase/auth";
 
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
+  if (!await getAdminUser()) return NextResponse.json({ error: "ต้องเข้าสู่ระบบ Admin" }, { status: 401 });
   const formData = await request.formData();
   const file = formData.get("file");
   if (!(file instanceof File)) return NextResponse.json({ error: "กรุณาเลือกไฟล์ .xlsx" }, { status: 400 });

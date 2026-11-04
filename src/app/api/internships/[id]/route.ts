@@ -4,7 +4,7 @@ import { normalizeOrganizationType } from "@/lib/organization-type";
 import { normalizeJobCategory } from "@/lib/job-category";
 import { createClient } from "@supabase/supabase-js";
 import { getAdminUser } from "@/lib/supabase/auth";
-import { extractGoogleMapsCoordinates } from "@/lib/google-maps";
+import { resolveGoogleMapsCoordinates } from "@/lib/google-maps";
 
 type UpdatePayload = {
   title?: string; jobCategory?: string; description?: string;
@@ -22,7 +22,7 @@ export async function GET(_: Request, { params }: { params: { id: string } }) {
   const supabase = createServerSupabaseClient();
   const { data, error } = await supabase
     .from("internships")
-    .select("*, companies!inner(*), internship_positions(positions(name)), internship_universities(universities(name))")
+    .select("*, companies!inner(*), internship_positions(positions(name)), internship_universities(universities(name)), academic_units!internships_academic_unit_id_fkey(id,name,universities(id,name))")
     .eq("id", params.id)
     .eq("status", "open")
     .eq("companies.status", "active")
@@ -41,6 +41,10 @@ export async function GET(_: Request, { params }: { params: { id: string } }) {
     positions: data.internship_positions.flatMap((row: { positions: { name: string } | null }) => row.positions ? [row.positions.name] : []),
     universities: data.internship_universities.flatMap((row: { universities: { name: string } | null }) => row.universities ? [row.universities.name] : []),
     allUniversities: data.all_universities,
+    universityId: data.academic_units?.universities?.id,
+    universityName: data.academic_units?.universities?.name,
+    academicUnitId: data.academic_unit_id ?? undefined,
+    academicUnitName: data.academic_units?.name,
     workMode: data.work_mode,
     allowanceType: data.allowance_type,
     allowanceMin: data.allowance_min ?? undefined,
@@ -87,7 +91,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
     const value = (input: unknown, fallback = "") => typeof input === "string" ? input.trim() : fallback;
     const numberOrNull = (input: string | undefined) => input && Number.isFinite(Number(input)) ? Number(input) : null;
     const googleMapsUrl = value(body.googleMapsUrl);
-    const linkCoordinates = extractGoogleMapsCoordinates(googleMapsUrl);
+    const linkCoordinates = await resolveGoogleMapsCoordinates(googleMapsUrl);
     const { error: companyError } = await supabase.from("companies").update({
       name: value(body.companyName), organization_type: normalizeOrganizationType(body.organizationType),
       business_type: value(body.businessType) || null, description: value(body.companyDescription) || null,

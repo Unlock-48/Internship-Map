@@ -1,12 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminUser } from "@/lib/supabase/auth";
+import { resolveGoogleMapsCoordinates } from "@/lib/google-maps";
 
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
   if (!await getAdminUser()) return NextResponse.json({ error: "ต้องเข้าสู่ระบบ Admin" }, { status: 401 });
   try {
-    const body = await request.json() as { address?: string; district?: string; province?: string };
+    const body = await request.json() as { address?: string; district?: string; province?: string; googleMapsUrl?: string };
+    if (body.googleMapsUrl?.trim()) {
+      const coordinates = await resolveGoogleMapsCoordinates(body.googleMapsUrl);
+      if (!coordinates) {
+        return NextResponse.json({ error: "อ่านพิกัดจากลิงก์นี้ไม่ได้ ลองคัดลอกลิงก์ Google Maps แบบเต็ม หรือกรอกพิกัดเอง" }, { status: 404 });
+      }
+      return NextResponse.json(coordinates);
+    }
     const parts = [body.address, body.district, body.province, "ประเทศไทย"].filter((value) => value?.trim());
     if (!parts.length) return NextResponse.json({ error: "กรุณาระบุที่อยู่ก่อนค้นหาพิกัด" }, { status: 400 });
     const search = encodeURIComponent(parts.join(", "));

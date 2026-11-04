@@ -25,7 +25,7 @@ export async function middleware(request: NextRequest) {
   const adminEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
   const isAdmin = Boolean(user && adminEmail && user.email?.toLowerCase() === adminEmail);
   const isAdminPath = request.nextUrl.pathname === "/admin" || request.nextUrl.pathname.startsWith("/admin/");
-  const isImportApi = request.nextUrl.pathname.startsWith("/api/admin/import/") || request.nextUrl.pathname.startsWith("/api/admin/moderation") || request.nextUrl.pathname.startsWith("/api/admin/companies") || request.nextUrl.pathname.startsWith("/api/admin/geocode") || request.nextUrl.pathname.startsWith("/api/admin/site-settings") || request.nextUrl.pathname.startsWith("/api/admin/reports");
+  const isImportApi = request.nextUrl.pathname.startsWith("/api/admin/import/") || request.nextUrl.pathname.startsWith("/api/admin/companies") || request.nextUrl.pathname.startsWith("/api/admin/geocode") || request.nextUrl.pathname.startsWith("/api/admin/site-settings") || request.nextUrl.pathname.startsWith("/api/admin/reports");
   const isLoginPage = request.nextUrl.pathname === "/admin/login";
 
   if ((isAdminPath || isImportApi) && !isAdmin && !isLoginPage) {
@@ -36,5 +36,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/admin/:path*", "/api/admin/import/:path*", "/api/admin/moderation", "/api/admin/companies", "/api/admin/geocode", "/api/admin/site-settings", "/api/admin/reports"]
+  matcher: ["/admin/:path*", "/api/admin/import/:path*", "/api/admin/companies", "/api/admin/geocode", "/api/admin/site-settings", "/api/admin/reports"]
 };

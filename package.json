@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "storage:clear-imports": "node scripts/clear-internship-import-storage.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",

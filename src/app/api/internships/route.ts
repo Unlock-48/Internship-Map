@@ -8,6 +8,7 @@ import { normalizeJobCategory } from "@/lib/job-category";
 type SupabaseInternship = {
   id: string;
   company_id: string;
+  academic_unit_id: string | null;
   title: string;
   job_category: string | null;
   description: string;
@@ -53,6 +54,12 @@ type SupabaseInternship = {
   };
   internship_positions: { positions: { name: string } | null }[];
   internship_universities: { universities: { name: string } | null }[];
+  academic_units: {
+    id: string;
+    name: string;
+    university_id: string;
+    universities: { id: string; name: string } | null;
+  } | null;
 };
 
 export async function GET(request: NextRequest) {
@@ -64,9 +71,44 @@ export async function GET(request: NextRequest) {
   const allowedModes: WorkMode[] = ["onsite", "hybrid", "remote", "undisclosed"];
   const requestedModes = url.searchParams.getAll("workMode").filter((mode): mode is WorkMode => allowedModes.includes(mode as WorkMode));
   const supabase = createServerSupabaseClient();
-  let query = supabase.from("internships").select("*, companies!inner(*), internship_positions(positions(name)), internship_universities(universities(name))").eq("status", "open").eq("companies.status", "active");
-  if (url.searchParams.get("q")) query = query.or(`title.ilike.%${url.searchParams.get("q")!.replace(/[%_]/g, "")}%,description.ilike.%${url.searchParams.get("q")!.replace(/[%_]/g, "")}%`);
+  let query = supabase.from("internships").select("*, companies!inner(*), internship_positions(positions(name)), internship_universities(universities(name)), academic_units!internships_academic_unit_id_fkey(id,name,university_id,universities(id,name))").eq("status", "open").eq("companies.status", "active");
+  const searchTerm = url.searchParams.get("q")?.replace(/[%_]/g, "");
   if (requestedModes.length) query = query.in("work_mode", requestedModes);
+  const universityId = url.searchParams.get("universityId");
+  const academicUnitId = url.searchParams.get("academicUnitId");
+  if (universityId || academicUnitId) {
+    const { data: units, error: unitsError } = await supabase
+      .from("academic_units")
+      .select("id,parent_id,university_id")
+      .eq("is_active", true);
+    if (unitsError) return NextResponse.json({ error: "ไม่สามารถอ่านโครงสร้างหน่วยงานได้", details: unitsError.message }, { status: 502 });
+    let matchingUnits = (units ?? []).filter((unit) => !universityId || unit.university_id === universityId);
+    if (academicUnitId) {
+      const selectedUnit = matchingUnits.find((unit) => unit.id === academicUnitId);
+      if (!selectedUnit) return NextResponse.json({ error: "ไม่พบหน่วยงานที่เลือก" }, { status: 400 });
+      const descendants = new Set([selectedUnit.id]);
+      let foundChild = true;
+      while (foundChild) {
+        foundChild = false;
+        for (const unit of matchingUnits) {
+          if (unit.parent_id && descendants.has(unit.parent_id) && !descendants.has(unit.id)) {
+            descendants.add(unit.id);
+            foundChild = true;
+          }
+        }
+      }
+      matchingUnits = matchingUnits.filter((unit) => descendants.has(unit.id));
+    }
+    if (!matchingUnits.length) return NextResponse.json({ data: [], count: 0, source: "supabase" });
+    const unitIds = matchingUnits.map((unit) => unit.id);
+    if (searchTerm) {
+      query = query.or(`and(or(title.ilike.%${searchTerm}%,description.ilike.%${searchTerm}%),or(academic_unit_id.in.(${unitIds.join(",")}),all_universities.eq.true))`);
+    } else {
+      query = query.or(`academic_unit_id.in.(${unitIds.join(",")}),all_universities.eq.true`);
+    }
+  } else if (searchTerm) {
+    query = query.or(`title.ilike.%${searchTerm}%,description.ilike.%${searchTerm}%`);
+  }
   const { data, error } = await query;
   if (error) return NextResponse.json({ error: "ไม่สามารถอ่านข้อมูลจาก Supabase ได้", details: error.message }, { status: 502 });
 
@@ -80,6 +122,10 @@ export async function GET(request: NextRequest) {
     positions: item.internship_positions.flatMap((row) => row.positions ? [row.positions.name] : []),
     universities: item.internship_universities.flatMap((row) => row.universities ? [row.universities.name] : []),
     allUniversities: item.all_universities,
+    universityId: item.academic_units?.universities?.id,
+    universityName: item.academic_units?.universities?.name,
+    academicUnitId: item.academic_unit_id ?? undefined,
+    academicUnitName: item.academic_units?.name,
     workMode: item.work_mode,
     allowanceType: item.allowance_type,
     allowanceMin: item.allowance_min ?? undefined,

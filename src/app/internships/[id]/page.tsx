@@ -11,6 +11,18 @@ function formatDetailText(value?: string) {
   const normalized = value.replace(/\r\n?/g, "\n");
   return normalized.includes("\n") ? normalized : normalized.replace(/\s+\*\s+/g, "\n• ");
 }
+function getWebsiteEntries(value?: string) {
+  return (value ?? "").split(/\r?\n/).map((label) => {
+    const text = label.trim();
+    if (!text) return undefined;
+    try {
+      const url = new URL(text);
+      return url.protocol === "https:" || url.protocol === "http:" ? { label: text, href: url.href } : { label: text };
+    } catch {
+      return { label: text };
+    }
+  }).filter((entry): entry is { label: string; href?: string } => Boolean(entry));
+}
 type EditForm = Record<string, string>;
 type Category = { id: string; category_type: "organization_type" | "business_type"; name: string };
 
@@ -75,12 +87,13 @@ export default function InternshipDetail({ params }: { params: { id: string } })
 
   if (!item) return <main className="page"><div className="notice">{error || "ไม่พบประกาศฝึกงาน"}</div><Link href="/">← กลับไปหน้าค้นหา</Link></main>;
   const { company } = item;
+  const websiteEntries = getWebsiteEntries(company.website);
   return <main className="page detail-page">
     <Link href="/">← กลับไปหน้าค้นหา</Link>
     <div className="detail-card">
       {message && <div className="notice success-notice" role="status">✓ {message}</div>}
       {error && <div className="notice" role="alert">{error}</div>}
-      <div className="detail-heading"><span className="badge">{item.workMode}</span><h1>{item.title}</h1><h2>{company.name}</h2><p><strong>ประเภทกิจการ:</strong> {valueOrUnknown(company.businessType)}</p><p><strong>ตำแหน่งที่รับ:</strong> {item.positions.length ? item.positions.join(", ") : item.title}</p>{isAdmin && !editing && <button className="button detail-edit-button" type="button" onClick={startEditing}>แก้ไขข้อมูล</button>}</div>
+      <div className="detail-heading"><span className="badge">{item.workMode}</span><h1>{item.title}</h1><h2>{company.name}</h2><p><strong>มหาวิทยาลัย/หน่วยงาน:</strong> {item.universityName || "ไม่ระบุ"} · {item.academicUnitName || "ไม่ระบุ"}</p><p><strong>ประเภทกิจการ:</strong> {valueOrUnknown(company.businessType)}</p><p><strong>ตำแหน่งที่รับ:</strong> {item.positions.length ? item.positions.join(", ") : item.title}</p>{isAdmin && !editing && <button className="button detail-edit-button" type="button" onClick={startEditing}>แก้ไขข้อมูล</button>}</div>
       {editing && <form className="detail-edit-form" onSubmit={save}>
         <h2>แก้ไขข้อมูลรายละเอียดงาน</h2>
         <div className="edit-grid">
@@ -96,7 +109,7 @@ export default function InternshipDetail({ params }: { params: { id: string } })
           <label className="field">จังหวัด<input className="input" value={form.province ?? ""} onChange={(e) => updateField("province", e.target.value)} /></label>
           <label className="field">Latitude<input className="input" value={form.latitude ?? ""} onChange={(e) => updateField("latitude", e.target.value)} /></label>
           <label className="field">Longitude<input className="input" value={form.longitude ?? ""} onChange={(e) => updateField("longitude", e.target.value)} /></label>
-          <label className="field">เว็บไซต์<input className="input" value={form.website ?? ""} onChange={(e) => updateField("website", e.target.value)} /></label>
+          <label className="field">เว็บไซต์<textarea className="input" rows={2} value={form.website ?? ""} onChange={(e) => updateField("website", e.target.value)} /></label>
           <label className="field">Facebook<input className="input" value={form.facebook ?? ""} onChange={(e) => updateField("facebook", e.target.value)} /></label>
           <label className="field">Google Maps<input className="input" value={form.googleMapsUrl ?? ""} onChange={(e) => updateField("googleMapsUrl", e.target.value)} /></label>
           <label className="field">โทรศัพท์บริษัท<input className="input" value={form.phone ?? ""} onChange={(e) => updateField("phone", e.target.value)} /></label>
@@ -113,7 +126,7 @@ export default function InternshipDetail({ params }: { params: { id: string } })
         <div className="form-actions"><button className="button secondary" type="button" onClick={() => setEditing(false)}>ยกเลิก</button><button className="button" disabled={saving}>{saving ? "กำลังบันทึก..." : "บันทึกการแก้ไข"}</button></div>
       </form>}
       <section className="detail-section"><h3>รายละเอียดงาน</h3><p className="preserve-lines">{formatDetailText(item.description)}</p></section>
-      <section className="detail-section"><h3>ข้อมูลบริษัทและสถานที่</h3><p><strong>ประเภทหน่วยงาน:</strong> {valueOrUnknown(company.organizationType)}</p><p><strong>รายละเอียดบริษัท:</strong></p><p className="preserve-lines">{formatDetailText(company.description)}</p><p><strong>ที่อยู่:</strong> {company.address} ({company.district}, {company.province})</p><p><strong>พิกัด:</strong> {company.latitude !== undefined && company.longitude !== undefined ? `${company.latitude}, ${company.longitude}` : "ไม่ระบุ"}</p><p><strong>เว็บไซต์:</strong> {company.website ? <a className="detail-link" href={company.website} target="_blank" rel="noreferrer">{company.website}</a> : "ไม่ระบุ"}</p><p><strong>Facebook:</strong> {company.facebook ? <a className="detail-link" href={company.facebook} target="_blank" rel="noreferrer">{company.facebook}</a> : "ไม่ระบุ"}</p><p><strong>Google Maps:</strong> {company.googleMapsUrl ? <a className="detail-link" href={company.googleMapsUrl} target="_blank" rel="noreferrer">เปิดแผนที่</a> : "ยังไม่มีลิงก์แผนที่"}</p></section>
+      <section className="detail-section"><h3>ข้อมูลบริษัทและสถานที่</h3><p><strong>ประเภทหน่วยงาน:</strong> {valueOrUnknown(company.organizationType)}</p><p><strong>รายละเอียดบริษัท:</strong></p><p className="preserve-lines">{formatDetailText(company.description)}</p><p><strong>ที่อยู่:</strong> {company.address} ({company.district}, {company.province})</p><p><strong>พิกัด:</strong> {company.latitude !== undefined && company.longitude !== undefined ? `${company.latitude}, ${company.longitude}` : "ไม่ระบุ"}</p><p><strong>เว็บไซต์:</strong> {websiteEntries.length ? websiteEntries.map((entry, index) => <span key={`${entry.label}-${index}`}>{entry.href ? <a className="detail-link" href={entry.href} target="_blank" rel="noreferrer">{entry.label}</a> : entry.label}{index < websiteEntries.length - 1 ? " · " : ""}</span>) : "ไม่ระบุ"}</p><p><strong>Facebook:</strong> {company.facebook ? <a className="detail-link" href={company.facebook} target="_blank" rel="noreferrer">{company.facebook}</a> : "ไม่ระบุ"}</p><p><strong>Google Maps:</strong> {company.googleMapsUrl ? <a className="detail-link" href={company.googleMapsUrl} target="_blank" rel="noreferrer">เปิดแผนที่</a> : "ยังไม่มีลิงก์แผนที่"}</p></section>
       <section className="detail-section"><h3>ผู้ประสานงาน / HR</h3><p><strong>ชื่อ-สกุล:</strong> {valueOrUnknown(company.coordinatorName)}</p><p><strong>ตำแหน่ง:</strong> {valueOrUnknown(company.coordinatorTitle)}</p><p><strong>เบอร์โทรศัพท์:</strong> {valueOrUnknown(company.coordinatorPhone || company.phone)}</p><p><strong>โทรศัพท์บริษัท:</strong> {valueOrUnknown(company.phone)}</p><p><strong>อีเมล:</strong> {valueOrUnknown(company.email)}</p></section>
       <section className="detail-section"><h3>ผู้มีอำนาจลงนาม</h3><p><strong>ชื่อ-สกุล:</strong> {valueOrUnknown(company.authorizedName)}</p><p><strong>ตำแหน่ง:</strong> {valueOrUnknown(company.authorizedTitle)}</p></section>
       <section className="detail-section"><h3>เวลาทำการ</h3><p>{valueOrUnknown(company.businessHours)}</p></section>

@@ -17,6 +17,10 @@ export const reportSchema = z.object({
 
 export const importRowSchema = z.object({
   rowNumber: z.number().int().positive(),
+  universityCode: z.string().max(100).default(""),
+  universityName: z.string().max(255).default(""),
+  academicUnitCode: z.string().max(100).default(""),
+  academicUnitName: z.string().max(255).default(""),
   companyId: z.string().max(100),
   companyName: z.string().trim().max(255),
   businessType: z.string().max(500),

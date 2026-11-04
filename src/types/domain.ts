@@ -34,6 +34,10 @@ export type Company = {
 export type Internship = {
   id: string;
   companyId: string;
+  universityId?: string;
+  universityName?: string;
+  academicUnitId?: string;
+  academicUnitName?: string;
   title: string;
   jobCategory: string;
   description: string;
