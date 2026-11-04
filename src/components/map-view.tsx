@@ -4,6 +4,7 @@ import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
 import L from "leaflet";
 import { useEffect, useRef, useState } from "react";
 import { Company } from "@/types/domain";
+import { provinceCoordinates } from "@/lib/province-coordinates";
 
 function markerIconFor(organizationType: string) {
   const markerClass = organizationType === "ภาคเอกชน"
@@ -29,8 +30,11 @@ const userIcon = L.divIcon({
   iconAnchor: [10, 10]
 });
 
-function MapController({ location, selectedCompany }: { location: [number, number] | null; selectedCompany?: Company }) {
+function MapController({ location, selectedCompany, province }: { location: [number, number] | null; selectedCompany?: Company; province: string }) {
   const map = useMap();
+  useEffect(() => {
+    if (province && provinceCoordinates[province]) map.flyTo(provinceCoordinates[province], 10, { duration: 1 });
+  }, [map, province]);
   useEffect(() => {
     if (location) map.flyTo(location, 15, { duration: 1 });
   }, [location, map]);
@@ -42,7 +46,7 @@ function MapController({ location, selectedCompany }: { location: [number, numbe
   return null;
 }
 
-export function MapView({ companies, selectedCompanyId, onSelect }: { companies: Company[]; selectedCompanyId?: string; onSelect: (id: string) => void }) {
+export function MapView({ companies, selectedCompanyId, onSelect, province = "เชียงใหม่" }: { companies: Company[]; selectedCompanyId?: string; onSelect: (id: string) => void; province?: string }) {
   const mappedCompanies = companies.filter((company) => company.latitude != null && company.longitude != null);
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
   const [locationStatus, setLocationStatus] = useState("");
@@ -76,8 +80,8 @@ export function MapView({ companies, selectedCompanyId, onSelect }: { companies:
 
   return (
     <div className="map real-map" aria-label="แผนที่สถานที่ฝึกงานจังหวัดเชียงใหม่">
-      <MapContainer key={mappedCompanies.map((company) => company.id).join(",")} center={[18.7883, 98.9853]} zoom={12} scrollWheelZoom className="leaflet-map">
-        <MapController location={userLocation} selectedCompany={selectedCompany} />
+      <MapContainer center={provinceCoordinates["เชียงใหม่"]} zoom={10} scrollWheelZoom className="leaflet-map">
+        <MapController location={userLocation} selectedCompany={selectedCompany} province={province} />
         <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
         {mappedCompanies.map((company) => (
           <Marker ref={(marker) => { markerRefs.current[company.id] = marker; }} key={company.id} position={[company.latitude!, company.longitude!]} icon={markerIconFor(company.organizationType)} eventHandlers={{ click: () => onSelect(company.id) }}>

@@ -8,6 +8,7 @@ import { InternshipResult } from "@/types/domain";
 import { jobCategories } from "@/lib/job-category";
 import { organizationTypes } from "@/lib/organization-type";
 import { provinces as allProvinces } from "@/lib/province";
+import { provinceCoordinates } from "@/lib/province-coordinates";
 
 const MapView = dynamic(() => import("@/components/map-view").then((module) => module.MapView), { ssr: false });
 const allowanceLabel = (item: InternshipResult) => {
@@ -25,6 +26,7 @@ export default function HomePage() {
   const [selected, setSelected] = useState<string>();
   const [items, setItems] = useState<InternshipResult[]>([]);
   const [loadError, setLoadError] = useState("");
+  const [mapProvince, setMapProvince] = useState("เชียงใหม่");
   const resultsScrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     let active = true;
@@ -41,6 +43,20 @@ export default function HomePage() {
       });
     return () => { active = false; };
   }, []);
+  useEffect(() => {
+    const match = document.cookie.match(/(?:^|; )internship-map-province=([^;]*)/);
+    const saved = match ? decodeURIComponent(match[1]) : "";
+    if (saved && provinceCoordinates[saved]) {
+      setMapProvince(saved);
+      setProvincesSelected([saved]);
+    }
+  }, []);
+  function changeProvince(value: string) {
+    setProvincesSelected(value ? [value] : []);
+    const province = value || "เชียงใหม่";
+    setMapProvince(province);
+    document.cookie = `internship-map-province=${encodeURIComponent(province)}; max-age=3600; path=/; SameSite=Lax`;
+  }
   const provinces = allProvinces;
   const results = useMemo(() => searchInternships(items, { q: query, organizationTypes: organizationTypesSelected, jobCategories: jobCategoriesSelected, provinces: provincesSelected }), [items, query, organizationTypesSelected, jobCategoriesSelected, provincesSelected]);
   const visibleCompanies = useMemo(() => {
@@ -61,10 +77,10 @@ export default function HomePage() {
       <main className="workspace">
         <section className="panel">
           <div className="panel-header">
-            <div className="search"><input className="input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ค้นหาบริษัท ตำแหน่ง หรือพื้นที่..." aria-label="ค้นหาฝึกงาน" /><button className="button secondary" onClick={() => { setQuery(""); setOrganizationTypesSelected([]); setJobCategoriesSelected([]); setProvincesSelected([]); }}>ล้าง</button></div>
+            <div className="search"><input className="input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ค้นหาบริษัท ตำแหน่ง หรือพื้นที่..." aria-label="ค้นหาฝึกงาน" /><button className="button secondary" onClick={() => { setQuery(""); setOrganizationTypesSelected([]); setJobCategoriesSelected([]); changeProvince(""); }}>ล้าง</button></div>
             <div className="filters organization-filters"><strong>ประเภทหน่วยงาน</strong>{organizationTypes.map((type) => <label className={`chip organization-chip organization-${type === "ภาคเอกชน" ? "private" : type === "ภาครัฐ" ? "government" : type === "Software House" ? "software" : "unknown"}`} key={type}><input type="checkbox" checked={organizationTypesSelected.includes(type)} onChange={() => toggleOrganizationType(type)} />{type}</label>)}</div>
             <details className="filter-disclosure" open><summary>ลักษณะงาน <span>เลือกกรองหมวดงาน</span></summary><div className="filters">{jobCategories.map((category) => <label className="chip" key={category}><input type="checkbox" checked={jobCategoriesSelected.includes(category)} onChange={() => setJobCategoriesSelected((current) => current.includes(category) ? current.filter((value) => value !== category) : [...current, category])} />{category}</label>)}</div></details>
-            <details className="filter-disclosure province-filter"><summary>จังหวัด <span>เลือกจังหวัด</span></summary><div className="province-filter-control"><select className="select" value={provincesSelected[0] ?? ""} onChange={(event) => setProvincesSelected(event.target.value ? [event.target.value] : [])}><option value="">ทุกจังหวัด</option>{provinces.map((province) => <option key={province} value={province}>{province}</option>)}</select></div></details>
+            <details className="filter-disclosure province-filter"><summary>จังหวัด <span>{provincesSelected[0] || "ทุกจังหวัด"}</span></summary><div className="province-filter-control"><select className="select" value={provincesSelected[0] ?? ""} onChange={(event) => changeProvince(event.target.value)}><option value="">ทุกจังหวัด</option>{provinces.map((province) => <option key={province} value={province}>{province}</option>)}</select></div></details>
           </div>
           <div className="results-scroll" ref={resultsScrollRef}>
             <div className="result-count">พบ {results.length} ประกาศ · ข้อมูลจาก Supabase</div>
@@ -73,7 +89,7 @@ export default function HomePage() {
             {!results.length && <div className="notice">ไม่พบประกาศที่ตรงกับเงื่อนไข ลองล้างตัวกรองหรือค้นหาคำอื่น</div>}
           </div>
         </section>
-        <MapView companies={visibleCompanies} selectedCompanyId={selected} onSelect={setSelected} />
+        <MapView companies={visibleCompanies} selectedCompanyId={selected} onSelect={setSelected} province={mapProvince} />
       </main>
       <footer className="site-footer"><span>INTERNSHIP-MAP</span><span>ข้อมูลเพื่อการค้นหาเบื้องต้น · ตรวจสอบข้อมูลล่าสุดก่อนสมัคร</span></footer>
     </div>
