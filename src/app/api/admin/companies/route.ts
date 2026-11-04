@@ -9,6 +9,7 @@ export const runtime = "nodejs";
 
 type CompanyInput = {
   id?: string;
+  internshipId?: string;
   companyName?: string;
   businessType?: string;
   organizationType?: string;
@@ -122,6 +123,7 @@ export async function POST(request: NextRequest) {
           .from("internships")
           .select("id")
           .eq("company_id", companyId)
+          .eq(body.internshipId ? "id" : "company_id", body.internshipId ?? companyId)
           .order("created_at", { ascending: true })
           .limit(1)
           .maybeSingle();
@@ -164,7 +166,56 @@ export async function DELETE(request: NextRequest) {
   const user = await getAdminUser();
   if (!user) return NextResponse.json({ error: "ต้องเข้าสู่ระบบ Admin" }, { status: 401 });
   try {
-    const id = new URL(request.url).searchParams.get("id");
+    const requestUrl = new URL(request.url);
+    if (requestUrl.searchParams.get("duplicate-unknown-position") === "true") {
+      const body = await request.json() as { internshipIds?: unknown };
+      const internshipIds = Array.isArray(body.internshipIds)
+        ? body.internshipIds.filter((id): id is string => typeof id === "string" && id.length > 0)
+        : [];
+      if (!internshipIds.length) return NextResponse.json({ ok: true, deleted: 0 });
+      const supabase = client();
+      const { data: candidates, error: candidateError } = await supabase
+        .from("internships")
+        .select("id,title,companies(name)")
+        ;
+      if (candidateError) throw candidateError;
+      const requestedIds = new Set(internshipIds);
+      const nameCounts = new Map<string, number>();
+      for (const candidate of candidates ?? []) {
+        const company = Array.isArray(candidate.companies) ? candidate.companies[0] : candidate.companies;
+        const name = typeof company?.name === "string" ? company.name.trim().replace(/\s+/g, " ").toLowerCase() : "";
+        if (name) nameCounts.set(name, (nameCounts.get(name) ?? 0) + 1);
+      }
+      const eligibleIds = (candidates ?? [])
+        .filter((candidate) => {
+          const company = Array.isArray(candidate.companies) ? candidate.companies[0] : candidate.companies;
+          const name = typeof company?.name === "string" ? company.name.trim().replace(/\s+/g, " ").toLowerCase() : "";
+          const title = typeof candidate.title === "string" ? candidate.title.trim().replace(/\s+/g, " ").toLowerCase() : "";
+          return requestedIds.has(candidate.id)
+            && (nameCounts.get(name) ?? 0) > 1
+            && (!title || title === "ไม่ระบุตำแหน่ง");
+        })
+        .map((candidate) => candidate.id);
+      if (!eligibleIds.length) return NextResponse.json({ ok: true, deleted: 0 });
+      const { error } = await supabase.from("internships").delete().in("id", eligibleIds);
+      if (error) throw error;
+      await supabase.from("audit_logs").insert({ actor_id: user.id, action: "delete_duplicate_unknown_internships", entity_type: "internship", entity_id: null });
+      return NextResponse.json({ ok: true, deleted: eligibleIds.length });
+    }
+    if (requestUrl.searchParams.get("all") === "true") {
+      const { error } = await client().from("companies").delete().not("id", "is", null);
+      if (error) throw error;
+      await client().from("audit_logs").insert({ actor_id: user.id, action: "clear_all_companies", entity_type: "company", entity_id: null });
+      return NextResponse.json({ ok: true });
+    }
+    const internshipId = requestUrl.searchParams.get("internshipId");
+    if (internshipId) {
+      const { error } = await client().from("internships").delete().eq("id", internshipId);
+      if (error) throw error;
+      await client().from("audit_logs").insert({ actor_id: user.id, action: "delete_internship", entity_type: "internship", entity_id: internshipId });
+      return NextResponse.json({ ok: true });
+    }
+    const id = requestUrl.searchParams.get("id");
     if (!id) return NextResponse.json({ error: "ไม่พบรหัสบริษัท" }, { status: 400 });
     const { error } = await client().from("companies").delete().eq("id", id);
     if (error) throw error;

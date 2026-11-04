@@ -78,6 +78,13 @@ function findValue(record: Record<string, unknown>, names: string[]): string {
   return entry ? clean(entry[1]) : "";
 }
 
+function duplicateKey(row: Omit<ImportRow, "rowNumber" | "errors">): string | null {
+  const normalize = (value: string) => value.trim().replace(/\s+/g, " ").toLowerCase();
+  const companyName = normalize(row.companyName);
+  const positionTitle = normalize(row.positionTitle);
+  return companyName && positionTitle ? `${companyName}\u001f${positionTitle}` : null;
+}
+
 export function parseInternshipWorkbook(buffer: ArrayBuffer): { headers: string[]; rows: ImportRow[] } {
   const workbook = XLSX.read(buffer, { type: "array", cellDates: false });
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
@@ -93,7 +100,14 @@ export function parseInternshipWorkbook(buffer: ArrayBuffer): { headers: string[
     }
     const road = findValue(record, aliases.road);
     row.address = [row.address, road].filter(Boolean).join(" ");
-    return { rowNumber: index + 2, ...row, errors: [] };
+    return { rowNumber: index + 2, ...row, errors: [] as string[] };
   });
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const key = duplicateKey(row);
+    if (!key) continue;
+    if (seen.has(key)) row.errors.push("ข้อมูลซ้ำกับแถวอื่นในไฟล์");
+    else seen.add(key);
+  }
   return { headers, rows };
 }

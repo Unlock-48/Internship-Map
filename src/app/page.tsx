@@ -7,6 +7,7 @@ import { searchInternships } from "@/lib/search";
 import { InternshipResult } from "@/types/domain";
 import { jobCategories } from "@/lib/job-category";
 import { organizationTypes } from "@/lib/organization-type";
+import { provinces as allProvinces } from "@/lib/province";
 
 const MapView = dynamic(() => import("@/components/map-view").then((module) => module.MapView), { ssr: false });
 const allowanceLabel = (item: InternshipResult) => {
@@ -20,6 +21,7 @@ export default function HomePage() {
   const [query, setQuery] = useState("");
   const [organizationTypesSelected, setOrganizationTypesSelected] = useState<string[]>([]);
   const [jobCategoriesSelected, setJobCategoriesSelected] = useState<string[]>([]);
+  const [provincesSelected, setProvincesSelected] = useState<string[]>([]);
   const [selected, setSelected] = useState<string>();
   const [items, setItems] = useState<InternshipResult[]>([]);
   const [loadError, setLoadError] = useState("");
@@ -39,7 +41,8 @@ export default function HomePage() {
       });
     return () => { active = false; };
   }, []);
-  const results = useMemo(() => searchInternships(items, { q: query, organizationTypes: organizationTypesSelected, jobCategories: jobCategoriesSelected }), [items, query, organizationTypesSelected, jobCategoriesSelected]);
+  const provinces = allProvinces;
+  const results = useMemo(() => searchInternships(items, { q: query, organizationTypes: organizationTypesSelected, jobCategories: jobCategoriesSelected, provinces: provincesSelected }), [items, query, organizationTypesSelected, jobCategoriesSelected, provincesSelected]);
   const visibleCompanies = useMemo(() => {
     const seen = new Set<string>();
     return results
@@ -58,9 +61,10 @@ export default function HomePage() {
       <main className="workspace">
         <section className="panel">
           <div className="panel-header">
-            <div className="search"><input className="input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ค้นหาบริษัท ตำแหน่ง หรือพื้นที่..." aria-label="ค้นหาฝึกงาน" /><button className="button secondary" onClick={() => { setQuery(""); setOrganizationTypesSelected([]); setJobCategoriesSelected([]); }}>ล้าง</button></div>
+            <div className="search"><input className="input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ค้นหาบริษัท ตำแหน่ง หรือพื้นที่..." aria-label="ค้นหาฝึกงาน" /><button className="button secondary" onClick={() => { setQuery(""); setOrganizationTypesSelected([]); setJobCategoriesSelected([]); setProvincesSelected([]); }}>ล้าง</button></div>
             <div className="filters organization-filters"><strong>ประเภทหน่วยงาน</strong>{organizationTypes.map((type) => <label className={`chip organization-chip organization-${type === "ภาคเอกชน" ? "private" : type === "ภาครัฐ" ? "government" : type === "Software House" ? "software" : "unknown"}`} key={type}><input type="checkbox" checked={organizationTypesSelected.includes(type)} onChange={() => toggleOrganizationType(type)} />{type}</label>)}</div>
             <details className="filter-disclosure" open><summary>ลักษณะงาน <span>เลือกกรองหมวดงาน</span></summary><div className="filters">{jobCategories.map((category) => <label className="chip" key={category}><input type="checkbox" checked={jobCategoriesSelected.includes(category)} onChange={() => setJobCategoriesSelected((current) => current.includes(category) ? current.filter((value) => value !== category) : [...current, category])} />{category}</label>)}</div></details>
+            <details className="filter-disclosure province-filter"><summary>จังหวัด <span>เลือกจังหวัด</span></summary><div className="province-filter-control"><select className="select" value={provincesSelected[0] ?? ""} onChange={(event) => setProvincesSelected(event.target.value ? [event.target.value] : [])}><option value="">ทุกจังหวัด</option>{provinces.map((province) => <option key={province} value={province}>{province}</option>)}</select></div></details>
           </div>
           <div className="results-scroll" ref={resultsScrollRef}>
             <div className="result-count">พบ {results.length} ประกาศ · ข้อมูลจาก Supabase</div>

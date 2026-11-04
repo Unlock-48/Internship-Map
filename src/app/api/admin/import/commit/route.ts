@@ -30,6 +30,14 @@ function companyStatus(value: string, fallback: "active" | "inactive" | "archive
   return value === "active" || value === "inactive" || value === "archived" ? value : fallback;
 }
 
+function duplicateKey(value: string) {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function isBlank(value: unknown) {
+  return value == null || (typeof value === "string" && !value.trim());
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json() as { rows?: unknown[] };
@@ -44,22 +52,22 @@ export async function POST(request: NextRequest) {
     let updated = 0;
     let skipped = 0;
     const errors: string[] = [];
+    const companyCache = new Map<string, string>();
 
     for (const row of rows as ImportRow[]) {
       const companyName = row.companyName || "ไม่ระบุบริษัท";
       const positionTitle = row.positionTitle || "ไม่ระบุตำแหน่ง";
       const { data: byId, error: idError } = row.companyId
-        ? await supabase.from("companies").select("id,district").eq("id", row.companyId).maybeSingle()
+        ? await supabase.from("companies").select("*").eq("id", row.companyId).maybeSingle()
         : { data: null, error: null };
       if (idError) throw idError;
-      const { data: existingCompanies, error: findError } = await supabase
-        .from("companies")
-        .select("id,district")
-        .eq("name", companyName)
-        .limit(20);
+      const cachedCompanyId = companyCache.get(duplicateKey(companyName));
+      const { data: existingCompanies, error: findError } = cachedCompanyId || byId
+        ? { data: [], error: null }
+        : await supabase.from("companies").select("*").ilike("name", companyName).limit(20);
       if (findError) throw findError;
 
-      const existing = byId ?? existingCompanies?.find((company) => row.district && company.district === row.district) ?? existingCompanies?.[0];
+      const existing = byId ?? (cachedCompanyId ? { id: cachedCompanyId } : existingCompanies?.find((company) => duplicateKey(company.name) === duplicateKey(companyName) && row.district && company.district === row.district) ?? existingCompanies?.find((company) => duplicateKey(company.name) === duplicateKey(companyName)));
       let companyId = existing?.id;
       if (!companyId) {
         const { data: company, error: companyError } = await supabase.from("companies").insert({
@@ -93,51 +101,75 @@ export async function POST(request: NextRequest) {
         if (companyError) throw companyError;
         companyId = company.id;
       } else {
+        const { data: currentCompany, error: currentCompanyError } = await supabase
+          .from("companies")
+          .select("*")
+          .eq("id", companyId)
+          .single();
+        if (currentCompanyError) throw currentCompanyError;
         const companyUpdate: Record<string, string | number | null> = {};
-        if (row.businessType) {
+        if (isBlank(currentCompany.business_type) && row.businessType) {
           companyUpdate.business_type = row.businessType;
+        }
+        if (isBlank(currentCompany.organization_type) && row.businessType) {
           companyUpdate.organization_type = inferOrganizationType(row.businessType);
         }
-        if (row.companyDescription) companyUpdate.description = row.companyDescription;
-        if (row.address) companyUpdate.address = row.address;
-        if (row.district) companyUpdate.district = row.district;
-        if (row.province) companyUpdate.province = row.province;
-        if (row.postalCode) companyUpdate.postal_code = row.postalCode;
+        if (isBlank(currentCompany.description) && row.companyDescription) companyUpdate.description = row.companyDescription;
+        if (isBlank(currentCompany.address) && row.address) companyUpdate.address = row.address;
+        if (isBlank(currentCompany.district) && row.district) companyUpdate.district = row.district;
+        if (isBlank(currentCompany.province) && row.province) companyUpdate.province = row.province;
+        if (isBlank(currentCompany.postal_code) && row.postalCode) companyUpdate.postal_code = row.postalCode;
         const importedCoordinates = extractGoogleMapsCoordinates(row.googleMapsUrl);
-        if (importedCoordinates) {
+        if (isBlank(currentCompany.latitude) && importedCoordinates) {
           companyUpdate.latitude = importedCoordinates.latitude;
-          companyUpdate.longitude = importedCoordinates.longitude;
-        } else {
-          if (row.latitude) companyUpdate.latitude = numberOrNull(row.latitude);
-          if (row.longitude) companyUpdate.longitude = numberOrNull(row.longitude);
+        } else if (isBlank(currentCompany.latitude) && row.latitude) {
+          companyUpdate.latitude = numberOrNull(row.latitude);
         }
-        if (row.website || row.allUrl) companyUpdate.website = row.website || row.allUrl;
-        if (row.googleMapsUrl) companyUpdate.google_maps_url = row.googleMapsUrl;
-        if (row.facebook) companyUpdate.facebook = row.facebook;
-        if (row.phone) companyUpdate.phone = row.phone;
-        if (row.email) companyUpdate.email = row.email;
-        if (row.status) companyUpdate.status = companyStatus(row.status);
-        if (row.lastVerifiedAt) companyUpdate.last_verified_at = row.lastVerifiedAt;
-        if (row.coordinatorName) companyUpdate.coordinator_name = row.coordinatorName;
-        if (row.coordinatorTitle) companyUpdate.coordinator_title = row.coordinatorTitle;
-        if (row.coordinatorPhone) companyUpdate.coordinator_phone = row.coordinatorPhone;
-        if (row.authorizedName) companyUpdate.authorized_name = row.authorizedName;
-        if (row.authorizedTitle) companyUpdate.authorized_title = row.authorizedTitle;
-        if (row.businessHours) companyUpdate.business_hours = row.businessHours;
-        if (row.advisorRecommendation) companyUpdate.advisor_recommendation = row.advisorRecommendation;
-        if (row.advisorName) companyUpdate.advisor_name = row.advisorName;
+        if (isBlank(currentCompany.longitude) && importedCoordinates) {
+          companyUpdate.longitude = importedCoordinates.longitude;
+        } else if (isBlank(currentCompany.longitude) && row.longitude) {
+          companyUpdate.longitude = numberOrNull(row.longitude);
+        }
+        const fill = (column: string, value: string) => {
+          if (isBlank(currentCompany[column]) && value) companyUpdate[column] = value;
+        };
+        fill("website", row.website || row.allUrl);
+        fill("google_maps_url", row.googleMapsUrl);
+        fill("facebook", row.facebook);
+        fill("phone", row.phone);
+        fill("email", row.email);
+        if (isBlank(currentCompany.status) && row.status) companyUpdate.status = companyStatus(row.status);
+        fill("last_verified_at", row.lastVerifiedAt);
+        fill("coordinator_name", row.coordinatorName);
+        fill("coordinator_title", row.coordinatorTitle);
+        fill("coordinator_phone", row.coordinatorPhone);
+        fill("authorized_name", row.authorizedName);
+        fill("authorized_title", row.authorizedTitle);
+        fill("business_hours", row.businessHours);
+        fill("advisor_recommendation", row.advisorRecommendation);
+        fill("advisor_name", row.advisorName);
         if (Object.keys(companyUpdate).length) {
           const { error: updateError } = await supabase.from("companies").update(companyUpdate).eq("id", companyId);
           if (updateError) throw updateError;
           updated++;
         }
       }
+      companyCache.set(duplicateKey(companyName), companyId);
 
-      const { data: duplicate } = await supabase.from("internships").select("id,description").eq("company_id", companyId).eq("title", positionTitle).maybeSingle();
+      const { data: existingInternships, error: internshipFindError } = await supabase
+        .from("internships")
+        .select("id,title,description,job_category")
+        .eq("company_id", companyId);
+      if (internshipFindError) throw internshipFindError;
+      const duplicate = positionTitle.trim()
+        ? existingInternships?.find((internship) => duplicateKey(internship.title) === duplicateKey(positionTitle))
+        : undefined;
       if (duplicate) {
         const internshipUpdate: Record<string, string> = {};
-        if (row.jobDescription) {
+        if (isBlank(duplicate.description) && row.jobDescription) {
           internshipUpdate.description = row.jobDescription;
+        }
+        if (isBlank(duplicate.job_category) && row.jobDescription) {
           internshipUpdate.job_category = inferJobCategory(positionTitle, row.jobDescription);
         }
         if (Object.keys(internshipUpdate).length) {
