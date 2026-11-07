@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { parseInternshipWorkbook } from "@/lib/import-workbook";
+import { classifyImportRows, parseInternshipWorkbook, validateImportRows } from "@/lib/import-workbook";
+import { getExistingImportData } from "@/lib/import-database";
 import { getAdminUser } from "@/lib/supabase/auth";
 
 export const runtime = "nodejs";
@@ -12,19 +13,28 @@ export async function POST(request: NextRequest) {
   if (!file.name.toLowerCase().endsWith(".xlsx")) return NextResponse.json({ error: "รองรับเฉพาะไฟล์ .xlsx" }, { status: 400 });
   if (file.size > 10 * 1024 * 1024) return NextResponse.json({ error: "ไฟล์ต้องมีขนาดไม่เกิน 10 MB" }, { status: 400 });
 
+  let result: ReturnType<typeof parseInternshipWorkbook>;
   try {
-    const result = parseInternshipWorkbook(await file.arrayBuffer());
+    result = parseInternshipWorkbook(await file.arrayBuffer());
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "อ่านไฟล์ไม่สำเร็จ" }, { status: 422 });
+  }
+
+  try {
+    const { companyNames, records } = await getExistingImportData();
+    const rows = validateImportRows(classifyImportRows(result.rows, companyNames, records));
     return NextResponse.json({
       fileName: file.name,
       headers: result.headers,
-      rows: result.rows,
+      rows,
       summary: {
-        total: result.rows.length,
-        valid: result.rows.filter((row) => row.errors.length === 0).length,
-        invalid: result.rows.filter((row) => row.errors.length > 0).length
+        total: rows.length,
+        valid: rows.filter((row) => row.errors.length === 0 && !row.duplicateInDatabase).length,
+        invalid: rows.filter((row) => row.errors.length > 0 || row.duplicateInDatabase).length
       }
     });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "อ่านไฟล์ไม่สำเร็จ" }, { status: 422 });
+    console.error("Failed to compare imported rows with existing internships", error);
+    return NextResponse.json({ error: error instanceof Error ? `ตรวจสอบรายการซ้ำกับฐานข้อมูลไม่สำเร็จ: ${error.message}` : "ตรวจสอบรายการซ้ำกับฐานข้อมูลไม่สำเร็จ" }, { status: 500 });
   }
 }

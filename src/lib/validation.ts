@@ -51,5 +51,8 @@ export const importRowSchema = z.object({
   businessHours: z.string().max(500),
   advisorRecommendation: z.string().max(5000),
   advisorName: z.string().max(255),
+  companyExistsInDatabase: z.boolean().default(false),
+  duplicateInDatabase: z.boolean().default(false),
+  duplicateInFile: z.boolean().default(false),
   errors: z.array(z.string())
 });

@@ -4,6 +4,7 @@ import { importRowSchema } from "@/lib/validation";
 import { inferJobCategory } from "@/lib/job-category";
 import { inferOrganizationType } from "@/lib/organization-type";
 import { extractGoogleMapsCoordinates } from "@/lib/google-maps";
+import { getImportDuplicateKey } from "@/lib/import-workbook";
 import { getAdminUser } from "@/lib/supabase/auth";
 import { createHash, randomUUID } from "node:crypto";
 
@@ -107,6 +108,30 @@ export async function POST(request: NextRequest) {
       universityCode: university.code,
       academicUnitCode: academicUnit.code
     }));
+    const existingInternshipIdsByKey = new Map<string, string>();
+    const existingDescriptionsByKey = new Map<string, Set<string>>();
+    const pageSize = 1000;
+    let start = 0;
+    while (true) {
+      const { data: existingInternships, error: existingInternshipsError } = await supabase
+        .from("internships")
+        .select("id,title,description,companies!inner(name)")
+        .order("id")
+        .range(start, start + pageSize - 1);
+      if (existingInternshipsError) throw existingInternshipsError;
+      for (const internship of existingInternships ?? []) {
+        const company = Array.isArray(internship.companies) ? internship.companies[0] : internship.companies;
+        const key = company?.name ? getImportDuplicateKey(company.name, internship.title) : null;
+        if (key) {
+          existingInternshipIdsByKey.set(key, internship.id);
+          const descriptions = existingDescriptionsByKey.get(key) ?? new Set<string>();
+          descriptions.add(duplicateKey(internship.description ?? ""));
+          existingDescriptionsByKey.set(key, descriptions);
+        }
+      }
+      if ((existingInternships?.length ?? 0) < pageSize) break;
+      start += pageSize;
+    }
     const fileBytes = Buffer.from(await file.arrayBuffer());
     const fileHash = createHash("sha256").update(fileBytes).digest("hex");
     const { data: batch, error: batchError } = await supabase
@@ -143,6 +168,7 @@ export async function POST(request: NextRequest) {
     const errors: string[] = [];
     const companyCache = new Map<string, string>();
     const academicUnitCache = new Map<string, string>();
+    const seenImportKeys = new Set<string>();
     const batchRows: {
       batch_id: string;
       source_row_number: number;
@@ -152,6 +178,23 @@ export async function POST(request: NextRequest) {
     }[] = [];
 
     for (const row of normalizedRows as ImportRow[]) {
+      const importKey = getImportDuplicateKey(row.companyName, row.positionTitle);
+      const rowSignature = importKey ? `${importKey}\u001f${duplicateKey(row.jobDescription)}` : null;
+      const existingInternshipId = importKey ? existingInternshipIdsByKey.get(importKey) : undefined;
+      const matchingDescriptions = importKey ? existingDescriptionsByKey.get(importKey) : undefined;
+      const sameDescriptionExists = Boolean(matchingDescriptions?.has(duplicateKey(row.jobDescription)) || !row.jobDescription.trim());
+      if ((existingInternshipId && sameDescriptionExists) || (rowSignature && seenImportKeys.has(rowSignature))) {
+        skipped++;
+        batchRows.push({
+          batch_id: batch.id,
+          source_row_number: row.rowNumber,
+          outcome: "skipped",
+          source_data: row,
+          internship_id: existingInternshipId ?? null
+        });
+        continue;
+      }
+      if (rowSignature) seenImportKeys.add(rowSignature);
       let rowChanged = false;
       const companyName = row.companyName || "ไม่ระบุบริษัท";
       const positionTitle = row.positionTitle || "ไม่ระบุตำแหน่ง";
@@ -301,43 +344,17 @@ export async function POST(request: NextRequest) {
       if (internshipFindError) throw internshipFindError;
       const duplicate = positionTitle.trim()
         ? existingInternships?.find((internship) =>
-          internship.academic_unit_id === academicUnitId
-          && duplicateKey(internship.title) === duplicateKey(positionTitle))
+          getImportDuplicateKey(companyName, internship.title) === getImportDuplicateKey(companyName, positionTitle))
         : undefined;
-      if (duplicate) {
-        const internshipUpdate: Record<string, string> = {};
-        if (isBlank(duplicate.description) && row.jobDescription) {
-          internshipUpdate.description = row.jobDescription;
-        }
-        if (isBlank(duplicate.job_category) && row.jobDescription) {
-          internshipUpdate.job_category = inferJobCategory(positionTitle, row.jobDescription);
-        }
-        if (Object.keys(internshipUpdate).length) {
-          const { error: updateError } = await supabase.from("internships").update(internshipUpdate).eq("id", duplicate.id);
-          if (updateError) throw updateError;
-          rowChanged = true;
-        }
-        if (rowChanged) updated++;
-        else skipped++;
+      if (duplicate && (duplicateKey(row.jobDescription) === duplicateKey(duplicate.description ?? "") || !row.jobDescription.trim())) {
+        skipped++;
         batchRows.push({
           batch_id: batch.id,
           source_row_number: row.rowNumber,
-          outcome: rowChanged ? "updated" : "skipped",
+          outcome: "skipped",
           source_data: row,
           internship_id: duplicate.id
         });
-        const { error: sourceError } = await supabase.from("opportunity_sources").upsert({
-          internship_id: duplicate.id,
-          academic_unit_id: academicUnit.id,
-          batch_id: batch.id,
-          source_row_number: row.rowNumber
-        }, { onConflict: "batch_id,source_row_number" });
-        if (sourceError) throw sourceError;
-        const { error: eligibleUnitError } = await supabase.from("internship_eligible_units").upsert({
-          internship_id: duplicate.id,
-          academic_unit_id: academicUnit.id
-        }, { onConflict: "internship_id,academic_unit_id" });
-        if (eligibleUnitError) throw eligibleUnitError;
         continue;
       }
 
