@@ -39,10 +39,15 @@ function MapController({ location, selectedCompany, province }: { location: [num
     if (location) map.flyTo(location, 15, { duration: 1 });
   }, [location, map]);
   useEffect(() => {
-    if (selectedCompany?.latitude != null && selectedCompany.longitude != null) {
+    if (!selectedCompany) return;
+    map.stop();
+    if (selectedCompany.latitude != null && selectedCompany.longitude != null) {
       map.flyTo([selectedCompany.latitude, selectedCompany.longitude], 16, { duration: 1 });
+      return;
     }
-  }, [map, selectedCompany]);
+    const provinceCenter = provinceCoordinates[selectedCompany.province] ?? provinceCoordinates[province];
+    if (provinceCenter) map.flyTo(provinceCenter, 10, { duration: 1 });
+  }, [map, province, selectedCompany?.id, selectedCompany?.latitude, selectedCompany?.longitude, selectedCompany?.province]);
   return null;
 }
 
@@ -55,9 +60,15 @@ export function MapView({ companies, selectedCompanyId, onSelect, province = "�
 
   useEffect(() => {
     if (selectedCompanyId && selectedCompany?.latitude == null) {
-      setLocationStatus("บริษัทนี้ยังไม่มีพิกัด");
+      setLocationStatus(selectedCompany
+        ? `“${selectedCompany.name}” ยังไม่มีพิกัด แสดงตำแหน่งโดยประมาณระดับจังหวัด`
+        : "บริษัทนี้ยังไม่มีพิกัด");
     }
     if (selectedCompany?.latitude != null && selectedCompany.longitude != null) {
+      setLocationStatus("");
+      Object.entries(markerRefs.current).forEach(([companyId, marker]) => {
+        if (companyId !== selectedCompany.id) marker?.closePopup();
+      });
       markerRefs.current[selectedCompany.id]?.openPopup();
     }
   }, [selectedCompany, selectedCompanyId]);

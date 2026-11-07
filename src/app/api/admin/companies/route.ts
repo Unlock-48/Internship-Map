@@ -4,6 +4,7 @@ import { getAdminUser } from "@/lib/supabase/auth";
 import { inferJobCategory } from "@/lib/job-category";
 import { normalizeOrganizationType } from "@/lib/organization-type";
 import { resolveGoogleMapsCoordinates } from "@/lib/google-maps";
+import { isUnknownLocationMarked, UNKNOWN_LOCATION_LABEL } from "@/lib/location";
 
 export const runtime = "nodejs";
 
@@ -36,6 +37,7 @@ type CompanyInput = {
   businessHours?: string;
   advisorRecommendation?: string;
   advisorName?: string;
+  unknownLocation?: boolean;
   positionTitle?: string;
   jobDescription?: string;
   jobCategory?: string;
@@ -99,18 +101,18 @@ export async function POST(request: NextRequest) {
     if (!academicUnit) {
       return NextResponse.json({ error: "หน่วยงานที่เลือกไม่อยู่ในมหาวิทยาลัยนี้ หรือถูกปิดใช้งาน" }, { status: 400 });
     }
-    const googleMapsUrl = text(body.googleMapsUrl);
-    const linkCoordinates = await resolveGoogleMapsCoordinates(googleMapsUrl);
-    const latitude = linkCoordinates?.latitude ?? (text(body.latitude) ? Number(body.latitude) : null);
-    const longitude = linkCoordinates?.longitude ?? (text(body.longitude) ? Number(body.longitude) : null);
+    const googleMapsUrl = body.unknownLocation ? "" : text(body.googleMapsUrl);
+    const linkCoordinates = body.unknownLocation ? null : await resolveGoogleMapsCoordinates(googleMapsUrl);
+    const latitude = body.unknownLocation ? null : linkCoordinates?.latitude ?? (text(body.latitude) ? Number(body.latitude) : null);
+    const longitude = body.unknownLocation ? null : linkCoordinates?.longitude ?? (text(body.longitude) ? Number(body.longitude) : null);
     const companyData = {
       name: companyName,
       business_type: text(body.businessType) || null,
       organization_type: normalizeOrganizationType(body.organizationType),
       description: text(body.companyDescription) || null,
-      address: text(body.address, "ไม่ระบุ"),
-      district: text(body.district, "ไม่ระบุ"),
-      province: text(body.province, "เชียงใหม่"),
+      address: body.unknownLocation ? UNKNOWN_LOCATION_LABEL : text(body.address) || (body.clearEmptyFields ? "" : "ไม่ระบุ"),
+      district: body.unknownLocation ? "ไม่ระบุ" : text(body.district) || (body.clearEmptyFields ? "" : "ไม่ระบุ"),
+      province: body.unknownLocation ? "ไม่ระบุ" : text(body.province) || (body.clearEmptyFields ? "" : body.id ? "" : "เชียงใหม่"),
       latitude,
       longitude,
       website: text(body.website) || null,
@@ -139,6 +141,7 @@ export async function POST(request: NextRequest) {
         .maybeSingle();
       if (existingCompanyError) throw existingCompanyError;
       if (!existingCompany) return NextResponse.json({ error: "ไม่พบบริษัทที่ต้องการแก้ไข" }, { status: 404 });
+      const previouslyMarkedUnknown = isUnknownLocationMarked(existingCompany.address);
       const updateData = {
         ...(body.clearEmptyFields ? companyData : {
           ...companyData,
@@ -163,6 +166,21 @@ export async function POST(request: NextRequest) {
           advisor_recommendation: companyData.advisor_recommendation ?? existingCompany.advisor_recommendation,
           advisor_name: companyData.advisor_name ?? existingCompany.advisor_name
         }),
+        ...(body.unknownLocation ? {
+          address: UNKNOWN_LOCATION_LABEL,
+          district: "ไม่ระบุ",
+          province: "ไม่ระบุ",
+          latitude: null,
+          longitude: null,
+          google_maps_url: null
+        } : previouslyMarkedUnknown ? {
+          address: companyData.address || "ไม่ระบุ",
+          district: companyData.district || "ไม่ระบุ",
+          province: companyData.province || "ไม่ระบุ",
+          latitude,
+          longitude,
+          google_maps_url: googleMapsUrl || null
+        } : {}),
         status: existingCompany.status
       };
       hasCoordinates = updateData.latitude != null && updateData.longitude != null;

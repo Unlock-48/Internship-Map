@@ -40,3 +40,35 @@ export function inferJobCategory(title: string, description: string): JobCategor
   if (/โรงแรม|บริการ|hotel/.test(text)) return "งานโรงแรมและบริการ";
   return "ไม่ระบุ";
 }
+
+export function isMissingJobCategory(value: string | null | undefined) {
+  const normalized = value?.trim().toLowerCase() ?? "";
+  return !normalized || ["ไม่ระบุ", "ไม่ระบุลักษณะงาน", "ไม่ทราบ", "ไม่ทราบลักษณะงาน", "ไม่ทราบหมวดหมู่งาน", "n/a", "ไม่มีข้อมูล", "ไม่มีข้อมูลลักษณะงาน"].includes(normalized);
+}
+
+export function isMissingJobTitle(value: string | null | undefined) {
+  const normalized = value?.trim().toLowerCase() ?? "";
+  return !normalized || ["ไม่ระบุตำแหน่ง", "ไม่ระบุตำแหน่งงาน", "ไม่ระบุ", "ไม่ทราบ", "ไม่ทราบตำแหน่ง", "n/a", "ไม่มีข้อมูล"].includes(normalized);
+}
+
+export function inferJobCategoryForBackfill(title: string, description: string): JobCategory | undefined {
+  const inferred = inferJobCategory(title, description);
+  if (inferred !== "ไม่ระบุ") return inferred;
+  const hasMeaningfulText = [title, description].some((value) =>
+    value.trim() && !isMissingJobTitle(value) && !isMissingJobCategory(value)
+  );
+  return hasMeaningfulText ? "อื่น ๆ" : undefined;
+}
+
+export function inferJobTitle(description: string): string | undefined {
+  const patterns = [
+    /(?:ตำแหน่งที่รับ|ชื่อตำแหน่ง|ตำแหน่งงาน|ตำแหน่ง|job\s*title|position(?:\s*title)?)\s*[:：-]\s*([^\r\n]+)/i,
+    /(?:รับสมัคร|รับนักศึกษาฝึกงาน)\s*(?:ในตำแหน่ง|ตำแหน่ง)\s*[:：-]?\s*([^\r\n]+)/i
+  ];
+  for (const pattern of patterns) {
+    const match = description.match(pattern);
+    const title = match?.[1]?.replace(/^[\s•*-]+|[\s,;。]+$/g, "").trim();
+    if (title && title.length <= 120 && !isMissingJobTitle(title)) return title;
+  }
+  return undefined;
+}

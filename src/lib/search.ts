@@ -1,4 +1,5 @@
 import { InternshipResult, WorkMode } from "@/types/domain";
+import { hasUnknownLocation } from "@/lib/location";
 
 export const UNKNOWN_PROVINCE_FILTER = "__unknown_province__";
 
@@ -7,6 +8,7 @@ export type SearchParams = {
   workModes?: WorkMode[];
   organizationTypes?: string[];
   jobCategories?: string[];
+  unknownLocationOnly?: boolean;
   provinces?: string[];
   district?: string;
   paidOnly?: boolean;
@@ -23,6 +25,7 @@ export function searchInternships(items: InternshipResult[], params: SearchParam
     if (params.workModes?.length && !params.workModes.includes(item.workMode)) return false;
     if (params.organizationTypes?.length && !params.organizationTypes.includes(item.company.organizationType)) return false;
     if (params.jobCategories?.length && !params.jobCategories.includes(item.jobCategory)) return false;
+    if (params.unknownLocationOnly && !hasUnknownLocation(item.company)) return false;
     if (params.provinces?.length) {
       const province = item.company.province?.trim();
       const matchesProvince = params.provinces.some((selectedProvince) => selectedProvince === UNKNOWN_PROVINCE_FILTER

@@ -42,7 +42,10 @@ function matchesSelectedValue(value: string, ...candidates: Array<string | null 
 }
 
 function isBlank(value: unknown) {
-  return value == null || (typeof value === "string" && !value.trim());
+  if (value == null) return true;
+  if (typeof value !== "string") return false;
+  const normalized = value.trim().toLowerCase();
+  return !normalized || ["ไม่ระบุ", "ไม่ทราบ", "ไม่ทราบจังหวัด", "ไม่มีข้อมูล", "n/a", "ไม่มี"].includes(normalized);
 }
 
 export async function POST(request: NextRequest) {

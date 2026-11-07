@@ -4,13 +4,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { searchInternships, UNKNOWN_PROVINCE_FILTER } from "@/lib/search";
+import { searchInternships } from "@/lib/search";
 import { InternshipResult } from "@/types/domain";
 import { jobCategories } from "@/lib/job-category";
 import { getAcademicUnitPath } from "@/lib/academic-units";
 import { organizationTypes } from "@/lib/organization-type";
-import { provinces as allProvinces } from "@/lib/province";
-import { provinceCoordinates } from "@/lib/province-coordinates";
+import { hasUnknownLocation, isUnknownLocationMarked, UNKNOWN_LOCATION_LABEL } from "@/lib/location";
 
 const MapView = dynamic(() => import("@/components/map-view").then((module) => module.MapView), { ssr: false });
 const allowanceLabel = (item: InternshipResult) => {
@@ -26,12 +25,11 @@ export default function HomePage() {
   const [query, setQuery] = useState("");
   const [organizationTypesSelected, setOrganizationTypesSelected] = useState<string[]>([]);
   const [jobCategoriesSelected, setJobCategoriesSelected] = useState<string[]>([]);
-  const [provincesSelected, setProvincesSelected] = useState<string[]>([]);
+  const [unknownLocationOnly, setUnknownLocationOnly] = useState(false);
   const [selected, setSelected] = useState<string>();
   const [detailItemId, setDetailItemId] = useState<string>();
   const [items, setItems] = useState<InternshipResult[]>([]);
   const [loadError, setLoadError] = useState("");
-  const [mapProvince, setMapProvince] = useState("เชียงใหม่");
   const [universities, setUniversities] = useState<University[]>([]);
   const [academicUnits, setAcademicUnits] = useState<AcademicUnit[]>([]);
   const [universityFilter, setUniversityFilter] = useState("");
@@ -75,24 +73,10 @@ export default function HomePage() {
     return () => { active = false; };
   }, [universityFilter, academicUnitFilter]);
   useEffect(() => {
-    const match = document.cookie.match(/(?:^|; )internship-map-province=([^;]*)/);
-    const saved = match ? decodeURIComponent(match[1]) : "";
-    if (saved === UNKNOWN_PROVINCE_FILTER) {
-      setProvincesSelected([saved]);
-    } else if (saved && provinceCoordinates[saved]) {
-      setMapProvince(saved);
-      setProvincesSelected([saved]);
-    }
+    document.cookie = "internship-map-province=; max-age=0; path=/; SameSite=Lax";
   }, []);
-  function changeProvince(value: string) {
-    setProvincesSelected(value ? [value] : []);
-    const province = value && value !== UNKNOWN_PROVINCE_FILTER ? value : "เชียงใหม่";
-    setMapProvince(province);
-    const savedFilter = value || province;
-    document.cookie = `internship-map-province=${encodeURIComponent(savedFilter)}; max-age=3600; path=/; SameSite=Lax`;
-  }
-  const provinces = allProvinces;
-  const results = useMemo(() => searchInternships(items, { q: query, organizationTypes: organizationTypesSelected, jobCategories: jobCategoriesSelected, provinces: provincesSelected }), [items, query, organizationTypesSelected, jobCategoriesSelected, provincesSelected]);
+  const results = useMemo(() => searchInternships(items, { q: query, organizationTypes: organizationTypesSelected, jobCategories: jobCategoriesSelected, unknownLocationOnly }), [items, query, organizationTypesSelected, jobCategoriesSelected, unknownLocationOnly]);
+  const unknownLocationCount = useMemo(() => items.filter((item) => hasUnknownLocation(item.company)).length, [items]);
   const detailItem = items.find((item) => item.id === detailItemId);
   const visibleCompanies = useMemo(() => {
     const seen = new Set<string>();
@@ -127,7 +111,7 @@ export default function HomePage() {
       <main className="workspace">
         <section className="panel">
           <div className="panel-header">
-            <div className="search"><input className="input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ค้นหาบริษัท ตำแหน่ง หรือพื้นที่..." aria-label="ค้นหาฝึกงาน" /><button className="button secondary" onClick={() => { setQuery(""); setOrganizationTypesSelected([]); setJobCategoriesSelected([]); setUniversityFilter(""); setAcademicUnitFilter(""); changeProvince(""); }}>ล้าง</button></div>
+            <div className="search"><input className="input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ค้นหาบริษัท ตำแหน่ง หรือพื้นที่..." aria-label="ค้นหาฝึกงาน" /><button className="button secondary" onClick={() => { setQuery(""); setOrganizationTypesSelected([]); setJobCategoriesSelected([]); setUnknownLocationOnly(false); setUniversityFilter(""); setAcademicUnitFilter(""); }}>ล้าง</button></div>
             <details className="filter-disclosure education-disclosure">
               <summary>
                 มหาวิทยาลัย / หน่วยงาน
@@ -137,17 +121,17 @@ export default function HomePage() {
             </details>
             <div className="filters organization-filters"><strong>ประเภทหน่วยงาน</strong>{organizationTypes.map((type) => <label className={`chip organization-chip organization-${type === "ภาคเอกชน" ? "private" : type === "ภาครัฐ" ? "government" : type === "Software House" ? "software" : "unknown"}`} key={type}><input type="checkbox" checked={organizationTypesSelected.includes(type)} onChange={() => toggleOrganizationType(type)} />{type}</label>)}</div>
             <details className="filter-disclosure job-category-disclosure"><summary>ลักษณะงาน <span>{jobCategoriesSelected.length ? `เลือกแล้ว ${jobCategoriesSelected.length} หมวด` : "เลือกกรองหมวดงาน"}</span></summary><div className="filters">{jobCategories.map((category) => <label className="chip" key={category}><input type="checkbox" checked={jobCategoriesSelected.includes(category)} onChange={() => setJobCategoriesSelected((current) => current.includes(category) ? current.filter((value) => value !== category) : [...current, category])} />{category}</label>)}</div></details>
-            <details className="filter-disclosure province-filter"><summary>จังหวัด <span>{provincesSelected[0] === UNKNOWN_PROVINCE_FILTER ? "ไม่ทราบจังหวัด" : provincesSelected[0] || "ทุกจังหวัด"}</span></summary><div className="province-filter-control"><select className="select" value={provincesSelected[0] ?? ""} onChange={(event) => changeProvince(event.target.value)}><option value="">ทุกจังหวัด</option><option value={UNKNOWN_PROVINCE_FILTER}>ไม่ทราบจังหวัด</option>{provinces.map((province) => <option key={province} value={province}>{province}</option>)}</select></div></details>
+            <details className="filter-disclosure location-info-disclosure"><summary>ข้อมูลสถานที่ <span>{unknownLocationOnly ? `ไม่ทราบข้อมูล (${unknownLocationCount})` : "ทุกสถานที่"}</span></summary><div className="filters"><label className="chip"><input type="checkbox" checked={unknownLocationOnly} onChange={(event) => setUnknownLocationOnly(event.target.checked)} />ไม่ทราบข้อมูล ({unknownLocationCount})</label></div></details>
           </div>
           <div className="results-scroll" ref={resultsScrollRef}>
             <div className="result-count">พบ {results.length} ประกาศ · ข้อมูลจาก Supabase</div>
             {loadError && <div className="notice" role="alert">โหลดข้อมูลจริงไม่สำเร็จ: {loadError}</div>}
-            {results.map((item) => <article className={`card ${selected === item.companyId ? "selected" : ""}`} data-company-id={item.companyId} key={item.id} onClick={() => setSelected(item.companyId)}><h3>{item.company.name}</h3><p><strong>มหาวิทยาลัย/หน่วยงาน:</strong> {item.universityName || "ไม่ระบุ"} · {item.academicUnitName || "ไม่ระบุ"}</p><p><strong>ประเภทหน่วยงาน:</strong> {item.company.organizationType}</p><p><strong>ประเภทกิจการ:</strong> {item.company.businessType || "ไม่ระบุ"}</p><p><strong>ลักษณะงาน:</strong> {item.jobCategory}</p><p><strong>ตำแหน่งที่รับ:</strong> {item.positions.length ? item.positions.join(", ") : item.title}</p><p>{item.description}</p><div className="badges"><span className="badge">{item.company.organizationType}</span><span className="badge">{item.jobCategory}</span><span className="badge">{allowanceLabel(item)}</span></div><p><Link href={`/internships/${item.id}`} onClick={(event) => openDetail(event, item)}>ดูรายละเอียด →</Link></p></article>)}
+            {results.map((item) => <article className={`card ${selected === item.companyId ? "selected" : ""}`} data-company-id={item.companyId} key={item.id} onClick={() => setSelected(item.companyId)}><h3>{item.company.name}</h3><p><strong>มหาวิทยาลัย/หน่วยงาน:</strong> {item.universityName || "ไม่ระบุ"} · {item.academicUnitName || "ไม่ระบุ"}</p><p><strong>ประเภทหน่วยงาน:</strong> {item.company.organizationType}</p><p><strong>ประเภทกิจการ:</strong> {item.company.businessType || "ไม่ระบุ"}</p><p><strong>ลักษณะงาน:</strong> {item.jobCategory}</p><p><strong>ตำแหน่งที่รับ:</strong> {item.positions.length ? item.positions.join(", ") : item.title}</p><p>{item.description}</p><div className="badges"><span className="badge">{item.company.organizationType}</span><span className="badge">{item.jobCategory}</span><span className="badge">{allowanceLabel(item)}</span>{hasUnknownLocation(item.company) && <span className="badge location-unknown-badge">{isUnknownLocationMarked(item.company.address) ? UNKNOWN_LOCATION_LABEL : "ข้อมูลสถานที่ไม่ครบ"}</span>}</div><p><Link href={`/internships/${item.id}`} onClick={(event) => openDetail(event, item)}>ดูรายละเอียด →</Link></p></article>)}
             {!results.length && <div className="notice">ไม่พบประกาศที่ตรงกับเงื่อนไข ลองล้างตัวกรองหรือค้นหาคำอื่น</div>}
           </div>
         </section>
         <div className="map-detail-stage">
-          <MapView companies={visibleCompanies} selectedCompanyId={selected} onSelect={setSelected} province={mapProvince} />
+          <MapView companies={visibleCompanies} selectedCompanyId={selected} onSelect={setSelected} />
           {detailItem && <aside className="map-detail-panel" aria-labelledby="map-detail-title">
             <header className="map-detail-header">
               <div><span className="eyebrow">รายละเอียดสถานที่ฝึกงาน</span><h2 id="map-detail-title">{detailItem.title}</h2><p>{detailItem.company.name}</p></div>
@@ -173,7 +157,8 @@ export default function HomePage() {
                 <p><strong>ประเภทหน่วยงาน</strong><span>{detailItem.company.organizationType || "ไม่ระบุ"}</span></p>
                 <p><strong>ประเภทกิจการ</strong><span>{detailItem.company.businessType || "ไม่ระบุ"}</span></p>
                 <p><strong>รายละเอียดบริษัท</strong><span className="preserve-lines">{detailItem.company.description || "ไม่ระบุ"}</span></p>
-                <p><strong>ที่อยู่</strong><span>{[detailItem.company.address, detailItem.company.district, detailItem.company.province].filter(Boolean).join(" ") || "ไม่ระบุ"}</span></p>
+                <p><strong>ที่อยู่</strong><span>{isUnknownLocationMarked(detailItem.company.address) ? UNKNOWN_LOCATION_LABEL : [detailItem.company.address, detailItem.company.district, detailItem.company.province].filter(Boolean).join(" ") || "ไม่ระบุ"}</span></p>
+                {hasUnknownLocation(detailItem.company) && <p><strong>ข้อมูลสถานที่</strong><span>{isUnknownLocationMarked(detailItem.company.address) ? "ผู้ดูแลระบุว่าค้นหาสถานที่นี้ไม่พบใน Google Maps" : "ข้อมูลสถานที่ยังไม่ครบ"}</span></p>}
                 {detailItem.company.latitude != null && detailItem.company.longitude != null && <p><strong>พิกัด</strong><span>{detailItem.company.latitude}, {detailItem.company.longitude}</span></p>}
                 {detailItem.company.googleMapsUrl && <p><strong>Google Maps</strong><span><a className="detail-link" href={detailItem.company.googleMapsUrl} target="_blank" rel="noreferrer">เปิดแผนที่</a></span></p>}
                 {detailItem.company.website && <p><strong>เว็บไซต์</strong><span className="map-detail-links">{detailItem.company.website.split(/\r?\n/).filter(Boolean).map((website) => <a className="detail-link" href={website} target="_blank" rel="noreferrer" key={website}>{website}</a>)}</span></p>}

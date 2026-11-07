@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
-import { jobCategories } from "@/lib/job-category";
+import { inferJobCategoryForBackfill, inferJobTitle, isMissingJobCategory, isMissingJobTitle, jobCategories } from "@/lib/job-category";
 import { provinces as allProvinces } from "@/lib/province";
 import { getAcademicUnitPath } from "@/lib/academic-units";
 import { AcademicStructureManager } from "@/components/admin/academic-structure-manager";
+import { hasUnknownLocation, isMissingLocationValue, isUnknownLocationMarked, UNKNOWN_LOCATION_LABEL } from "@/lib/location";
 
 type Company = {
   id: string; name: string; business_type: string | null; organization_type: string; description: string | null; address: string; district: string; province: string; website: string | null;
@@ -18,8 +19,8 @@ type University = { id: string; code: string; name: string };
 type AcademicUnit = { id: string; university_id: string; parent_id: string | null; code: string; name: string; unit_type: string };
 type Report = { id: string; source: "report" | "submission"; type: "เสนอข้อมูล" | "แจ้งข้อมูลผิด"; reference: string; reason: string; details: string; status: "pending" | "reviewed" | "dismissed"; created_at: string };
 type Category = { id: string; category_type: "organization_type" | "business_type"; name: string; is_active: boolean };
-type FormData = { id?: string; internshipId?: string; universityId: string; academicUnitId: string; allUniversities: boolean; clearEmptyFields: boolean; companyName: string; organizationType: string; businessType: string; companyDescription: string; address: string; district: string; province: string; latitude: string; longitude: string; website: string; facebook: string; googleMapsUrl: string; phone: string; email: string; coordinatorName: string; coordinatorTitle: string; coordinatorPhone: string; authorizedName: string; authorizedTitle: string; businessHours: string; advisorRecommendation: string; advisorName: string; positionTitle: string; jobCategory: string; jobDescription: string };
-const emptyForm: FormData = { universityId: "", academicUnitId: "", allUniversities: false, clearEmptyFields: false, companyName: "", organizationType: "ไม่ระบุ", businessType: "", companyDescription: "", address: "", district: "", province: "เชียงใหม่", latitude: "", longitude: "", website: "", facebook: "", googleMapsUrl: "", phone: "", email: "", coordinatorName: "", coordinatorTitle: "", coordinatorPhone: "", authorizedName: "", authorizedTitle: "", businessHours: "", advisorRecommendation: "", advisorName: "", positionTitle: "", jobCategory: "ไม่ระบุ", jobDescription: "" };
+type FormData = { id?: string; internshipId?: string; universityId: string; academicUnitId: string; allUniversities: boolean; clearEmptyFields: boolean; unknownLocation: boolean; companyName: string; organizationType: string; businessType: string; companyDescription: string; address: string; district: string; province: string; latitude: string; longitude: string; website: string; facebook: string; googleMapsUrl: string; phone: string; email: string; coordinatorName: string; coordinatorTitle: string; coordinatorPhone: string; authorizedName: string; authorizedTitle: string; businessHours: string; advisorRecommendation: string; advisorName: string; positionTitle: string; jobCategory: string; jobDescription: string };
+const emptyForm: FormData = { universityId: "", academicUnitId: "", allUniversities: false, clearEmptyFields: false, unknownLocation: false, companyName: "", organizationType: "ไม่ระบุ", businessType: "", companyDescription: "", address: "", district: "", province: "", latitude: "", longitude: "", website: "", facebook: "", googleMapsUrl: "", phone: "", email: "", coordinatorName: "", coordinatorTitle: "", coordinatorPhone: "", authorizedName: "", authorizedTitle: "", businessHours: "", advisorRecommendation: "", advisorName: "", positionTitle: "", jobCategory: "ไม่ระบุ", jobDescription: "" };
 
 export default function AdminPage() {
   const [user, setUser] = useState("");
@@ -34,16 +35,21 @@ export default function AdminPage() {
   const [openReportId, setOpenReportId] = useState<string | null>(null);
   const [inboxFilter, setInboxFilter] = useState<"all" | "submission" | "report">("all");
   const [showInbox, setShowInbox] = useState(false);
+  const [showAdminTools, setShowAdminTools] = useState(false);
   const [form, setForm] = useState<FormData>(emptyForm);
   const [showForm, setShowForm] = useState(false);
   const [query, setQuery] = useState("");
-  const [locationFilter, setLocationFilter] = useState<"all" | "unknown" | "unknownProvince" | "noGoogleMap">("all");
+  const [locationFilter, setLocationFilter] = useState<"all" | "unknown" | "markedUnknown" | "unknownProvince" | "noGoogleMap">("all");
+  const [jobCategoryFilter, setJobCategoryFilter] = useState<"all" | "unknown">("all");
   const [duplicateNameFilter, setDuplicateNameFilter] = useState<"all" | "duplicates">("all");
   const [provinceFilter, setProvinceFilter] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [geocoding, setGeocoding] = useState(false);
+  const [backfillingLocations, setBackfillingLocations] = useState(false);
+  const [locationBackfillProgress, setLocationBackfillProgress] = useState("");
+  const [autoClassifying, setAutoClassifying] = useState(false);
   const [showLogoForm, setShowLogoForm] = useState(false);
   const [showCategorySettings, setShowCategorySettings] = useState(false);
   const [categorySearch, setCategorySearch] = useState("");
@@ -138,7 +144,8 @@ export default function AdminPage() {
     const defaultUniversity = universities.find((university) => university.code === "CMRU") ?? universities[0];
     const defaultUnit = academicUnits.find((unit) => unit.university_id === defaultUniversity?.id && unit.code === "COMSCI")
       ?? academicUnits.find((unit) => unit.university_id === defaultUniversity?.id);
-    setForm({ ...emptyForm, id: company.id, internshipId: selectedInternship?.id, universityId: selectedInternship?.academic_units?.university_id ?? defaultUnit?.university_id ?? "", academicUnitId: selectedInternship?.academic_unit_id ?? defaultUnit?.id ?? "", allUniversities: selectedInternship?.all_universities ?? false, companyName: company.name, organizationType: company.organization_type || "ไม่ระบุ", businessType: company.business_type ?? "", companyDescription: company.description ?? "", address: company.address ?? "", district: company.district ?? "", province: company.province ?? "เชียงใหม่", latitude: company.latitude?.toString() ?? "", longitude: company.longitude?.toString() ?? "", website: company.website ?? "", facebook: company.facebook ?? "", googleMapsUrl: company.google_maps_url ?? "", phone: company.phone ?? "", email: company.email ?? "", coordinatorName: company.coordinator_name ?? "", coordinatorTitle: company.coordinator_title ?? "", coordinatorPhone: company.coordinator_phone ?? "", authorizedName: company.authorized_name ?? "", authorizedTitle: company.authorized_title ?? "", businessHours: company.business_hours ?? "", advisorRecommendation: company.advisor_recommendation ?? "", advisorName: company.advisor_name ?? "", positionTitle: selectedInternship?.title ?? "", jobCategory: selectedInternship?.job_category ?? "ไม่ระบุ", jobDescription: selectedInternship?.description ?? "" });
+    const unknownLocation = isUnknownLocationMarked(company.address);
+    setForm({ ...emptyForm, id: company.id, internshipId: selectedInternship?.id, universityId: selectedInternship?.academic_units?.university_id ?? defaultUnit?.university_id ?? "", academicUnitId: selectedInternship?.academic_unit_id ?? defaultUnit?.id ?? "", allUniversities: selectedInternship?.all_universities ?? false, unknownLocation, companyName: company.name, organizationType: company.organization_type || "ไม่ระบุ", businessType: company.business_type ?? "", companyDescription: company.description ?? "", address: unknownLocation ? "" : company.address ?? "", district: unknownLocation ? "" : company.district ?? "", province: unknownLocation ? "" : company.province ?? "", latitude: unknownLocation ? "" : company.latitude?.toString() ?? "", longitude: unknownLocation ? "" : company.longitude?.toString() ?? "", website: company.website ?? "", facebook: company.facebook ?? "", googleMapsUrl: unknownLocation ? "" : company.google_maps_url ?? "", phone: company.phone ?? "", email: company.email ?? "", coordinatorName: company.coordinator_name ?? "", coordinatorTitle: company.coordinator_title ?? "", coordinatorPhone: company.coordinator_phone ?? "", authorizedName: company.authorized_name ?? "", authorizedTitle: company.authorized_title ?? "", businessHours: company.business_hours ?? "", advisorRecommendation: company.advisor_recommendation ?? "", advisorName: company.advisor_name ?? "", positionTitle: selectedInternship?.title ?? "", jobCategory: selectedInternship?.job_category ?? "ไม่ระบุ", jobDescription: selectedInternship?.description ?? "" });
     setShowForm(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -252,6 +259,7 @@ export default function AdminPage() {
     } catch (reason) { setError(reason instanceof Error ? reason.message : "บันทึกข้อมูลไม่สำเร็จ"); } finally { setBusy(false); }
   }
   async function geocode() {
+    if (form.unknownLocation) return;
     setGeocoding(true); setError("");
     try {
       const response = await fetch("/api/admin/geocode", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ address: form.address, district: form.district, province: form.province }) });
@@ -262,6 +270,7 @@ export default function AdminPage() {
     } catch (reason) { setError(reason instanceof Error ? reason.message : "ค้นหาพิกัดไม่สำเร็จ"); } finally { setGeocoding(false); }
   }
   async function geocodeGoogleMapsLink() {
+    if (form.unknownLocation) return;
     if (!form.googleMapsUrl.trim()) {
       setError("กรุณาวางลิงก์ Google Maps ก่อนดึงพิกัด");
       return;
@@ -269,13 +278,100 @@ export default function AdminPage() {
     setGeocoding(true); setError(""); setMessage("");
     try {
       const response = await fetch("/api/admin/geocode", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ googleMapsUrl: form.googleMapsUrl }) });
-      const payload = await response.json() as { latitude?: number; longitude?: number; error?: string };
-      if (!response.ok || payload.latitude == null || payload.longitude == null) throw new Error(payload.error ?? "อ่านพิกัดจาก Google Maps ไม่สำเร็จ");
-      setForm((current) => ({ ...current, latitude: String(payload.latitude), longitude: String(payload.longitude) }));
-      setMessage(`อ่านพิกัดจาก Google Maps แล้ว: ${payload.latitude}, ${payload.longitude}`);
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "อ่านพิกัดจาก Google Maps ไม่สำเร็จ"); } finally { setGeocoding(false); }
+      const payload = await response.json() as { latitude?: number; longitude?: number; address?: string; district?: string; province?: string; error?: string };
+      if (!response.ok || payload.latitude == null || payload.longitude == null) throw new Error(payload.error ?? "อ่านข้อมูลจาก Google Maps ไม่สำเร็จ");
+      const updatedFields = [
+        isMissingLocationValue(form.latitude),
+        isMissingLocationValue(form.longitude),
+        isMissingLocationValue(form.address) && Boolean(payload.address),
+        isMissingLocationValue(form.district) && Boolean(payload.district),
+        isMissingLocationValue(form.province) && Boolean(payload.province)
+      ].filter(Boolean).length;
+      setForm((current) => {
+        const next = { ...current };
+        if (isMissingLocationValue(current.latitude)) next.latitude = String(payload.latitude);
+        if (isMissingLocationValue(current.longitude)) next.longitude = String(payload.longitude);
+        if (isMissingLocationValue(current.address) && payload.address) next.address = payload.address;
+        if (isMissingLocationValue(current.district) && payload.district) next.district = payload.district;
+        if (isMissingLocationValue(current.province) && payload.province) next.province = payload.province;
+        return next;
+      });
+      setMessage(`ดึงพิกัดและข้อมูลที่อยู่จากลิงก์แล้ว (${updatedFields} ช่องที่ว่าง) กรุณาตรวจสอบก่อนบันทึก`);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "อ่านข้อมูลจาก Google Maps ไม่สำเร็จ"); } finally { setGeocoding(false); }
   }
   const jobs = companies.flatMap((company) => company.internships.map((internship) => ({ company, internship })));
+  const openInternships = jobs.filter(({ internship }) => internship.status === "open");
+  const autoClassifyCandidates = openInternships.filter(({ internship }) => {
+    const inferredTitle = isMissingJobTitle(internship.title) ? inferJobTitle(internship.description ?? "") : undefined;
+    const titleForCategory = inferredTitle ?? (isMissingJobTitle(internship.title) ? "" : internship.title);
+    return (isMissingJobTitle(internship.title) && Boolean(inferredTitle))
+      || (isMissingJobCategory(internship.job_category)
+        && Boolean(inferJobCategoryForBackfill(titleForCategory, internship.description ?? "")));
+  });
+  const backfillCandidates = companies.filter((company) => !isUnknownLocationMarked(company.address) && company.google_maps_url?.trim() && (
+    company.latitude == null
+    || company.longitude == null
+    || isMissingLocationValue(company.address)
+    || isMissingLocationValue(company.district)
+    || isMissingLocationValue(company.province)
+  ));
+  async function backfillGoogleMapsLocations() {
+    if (!backfillCandidates.length || backfillingLocations) return;
+    if (!window.confirm(`ค้นหาและเติมข้อมูลตำแหน่งให้ ${backfillCandidates.length} บริษัทที่มีลิงก์ Google Maps และข้อมูลยังไม่ครบหรือไม่?\n\nระบบจะเติมเฉพาะช่องว่าง ไม่เขียนทับข้อมูลเดิม และเว้นช่วงการค้นหาเพื่อใช้บริการ Nominatim อย่างเหมาะสม`)) return;
+    setBackfillingLocations(true); setError(""); setMessage("");
+    let updated = 0;
+    let skipped = 0;
+    const failures: string[] = [];
+    try {
+      for (let index = 0; index < backfillCandidates.length; index += 1) {
+        const company = backfillCandidates[index];
+        setLocationBackfillProgress(`${index + 1} / ${backfillCandidates.length} · ${company.name}`);
+        if (index > 0) await new Promise((resolve) => setTimeout(resolve, 1100));
+        try {
+          const response = await fetch(`/api/admin/companies/${encodeURIComponent(company.id)}/location`, { method: "POST" });
+          const payload = await response.json() as { status?: string; error?: string };
+          if (!response.ok) throw new Error(payload.error ?? "ค้นหาข้อมูลตำแหน่งไม่สำเร็จ");
+          if (payload.status === "updated") updated += 1;
+          else skipped += 1;
+        } catch (reason) {
+          failures.push(`${company.name}: ${reason instanceof Error ? reason.message : "เกิดข้อผิดพลาด"}`);
+        }
+      }
+      await load();
+      setMessage(`ประมวลผลย้อนหลังเสร็จแล้ว: เติมข้อมูล ${updated} บริษัท, ข้าม ${skipped} บริษัท${failures.length ? `, ผิดพลาด ${failures.length} บริษัท` : ""}`);
+      if (failures.length) setError(failures.slice(0, 5).join(" · "));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "โหลดข้อมูลหลังประมวลผลไม่สำเร็จ");
+    } finally {
+      setBackfillingLocations(false);
+      setLocationBackfillProgress("");
+    }
+  }
+  async function autoClassifyOpenInternships() {
+    if (!autoClassifyCandidates.length || autoClassifying) return;
+    if (!window.confirm(`เติมชื่อตำแหน่งและหมวดลักษณะงานให้ประกาศที่เปิดรับหรือไม่?\n\nมี ${autoClassifyCandidates.length} รายการที่มีข้อมูลพอให้เติม ระบบจะไม่แก้ประกาศปิดรับหรือเขียนทับค่าที่มีอยู่ ชื่อตำแหน่งจะเติมเฉพาะเมื่อรายละเอียดระบุชัด และจะสรุปรายการที่ต้องตรวจเอง`)) return;
+    setAutoClassifying(true); setError(""); setMessage("");
+    try {
+      const response = await fetch("/api/admin/internships/auto-classify", { method: "POST" });
+      const payload = await response.json() as {
+        updatedCategories?: number;
+        updatedTitles?: number;
+        unresolvedCategories?: number;
+        unresolvedTitles?: number;
+        failed?: number;
+        errors?: string[];
+        error?: string;
+      };
+      if (!response.ok) throw new Error(payload.error ?? "จัดหมวดงานอัตโนมัติไม่สำเร็จ");
+      await load();
+      setMessage(`จัดการประกาศเปิดรับเสร็จแล้ว: เติมหมวดงาน ${payload.updatedCategories ?? 0} รายการ, เติมชื่อตำแหน่ง ${payload.updatedTitles ?? 0} รายการ, ต้องตรวจหมวดงาน ${payload.unresolvedCategories ?? 0} รายการ และชื่อตำแหน่ง ${payload.unresolvedTitles ?? 0} รายการ${payload.failed ? `, ผิดพลาด ${payload.failed} รายการ` : ""}`);
+      if (payload.errors?.length) setError(payload.errors.join(" · "));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "จัดหมวดงานอัตโนมัติไม่สำเร็จ");
+    } finally {
+      setAutoClassifying(false);
+    }
+  }
   const companyNameCounts = jobs.reduce((counts, { company }) => {
     const normalizedName = company.name.trim().replace(/\s+/g, " ").toLowerCase();
     if (normalizedName) counts.set(normalizedName, (counts.get(normalizedName) ?? 0) + 1);
@@ -297,20 +393,30 @@ export default function AdminPage() {
   }
   const filtered = jobs.filter(({ company, internship }) => {
     const matchesQuery = `${company.name} ${internship.title} ${internship.description} ${internship.job_category} ${company.business_type ?? ""} ${company.district}`.toLowerCase().includes(query.toLowerCase());
-    const unknownLocation = company.latitude == null || company.longitude == null || !company.address || company.address === "ไม่ระบุ";
+    const unknownLocation = hasUnknownLocation({
+      latitude: company.latitude,
+      longitude: company.longitude,
+      address: company.address,
+      district: company.district,
+      province: company.province,
+      googleMapsUrl: company.google_maps_url
+    });
     const unknownProvince = !company.province?.trim() || ["ไม่ระบุ", "ไม่ทราบจังหวัด"].includes(company.province.trim());
     const noGoogleMap = !company.google_maps_url?.trim();
     const matchesProvince = !provinceFilter || company.province === provinceFilter;
     const matchesLocation = locationFilter === "all"
       || (locationFilter === "unknown" && unknownLocation)
+      || (locationFilter === "markedUnknown" && isUnknownLocationMarked(company.address))
       || (locationFilter === "unknownProvince" && unknownProvince)
       || (locationFilter === "noGoogleMap" && noGoogleMap);
     const normalizedCompanyName = company.name.trim().replace(/\s+/g, " ").toLowerCase();
     const matchesDuplicateName = duplicateNameFilter === "all"
       || (companyNameCounts.get(normalizedCompanyName) ?? 0) > 1;
+    const matchesJobCategory = jobCategoryFilter === "all"
+      || (jobCategoryFilter === "unknown" && isMissingJobCategory(internship.job_category));
     const matchesUniversity = !universityFilter || internship.academic_units?.universities?.id === universityFilter;
     const matchesAcademicUnit = !academicUnitFilter || academicUnitFilterIds.has(internship.academic_unit_id ?? "");
-    return matchesQuery && matchesLocation && matchesProvince && matchesDuplicateName && matchesUniversity && matchesAcademicUnit;
+    return matchesQuery && matchesLocation && matchesProvince && matchesDuplicateName && matchesJobCategory && matchesUniversity && matchesAcademicUnit;
   });
   const provinces = allProvinces;
   const duplicateUnknownPositionIds = jobs
@@ -323,11 +429,20 @@ export default function AdminPage() {
     .map(({ internship }) => internship.id);
 
   return <main className="page admin-dashboard">
-    <div className="admin-hero"><div><p className="eyebrow">ADMIN CONTROL CENTER</p><h1>จัดการตำแหน่งงาน</h1><p>ดู แก้ไข ลบ และเพิ่มข้อมูลตำแหน่งฝึกงาน</p></div><div className="admin-hero-actions"><button className="button secondary inbox-button" onClick={() => setShowInbox((current) => !current)}>✉ จดหมาย {reports.filter((report) => report.status === "pending").length > 0 && <span className="inbox-badge">{reports.filter((report) => report.status === "pending").length}</span>}</button><button className="button secondary" onClick={() => setShowLogoForm((current) => !current)}>🖼️ เปลี่ยนโลโก้</button><button className="button" onClick={() => { setForm(emptyForm); setShowForm(true); }}>＋ เพิ่มที่ฝึกงาน</button><button className="button danger" disabled={clearing} onClick={clearAllData}>{clearing ? "กำลังล้างข้อมูล..." : "ล้างข้อมูลทั้งหมด"}</button></div></div>
-    <AcademicStructureManager />
+    <div className="admin-hero"><div className="admin-heading"><p className="eyebrow">ADMIN CONTROL CENTER</p><h1>จัดการตำแหน่งงาน</h1><p>ดู แก้ไข ลบ และเพิ่มข้อมูลตำแหน่งฝึกงาน</p></div><div className="admin-hero-actions"><button className="button secondary inbox-button" onClick={() => { setShowAdminTools(true); setShowInbox((current) => !current); }}>✉ จดหมาย {reports.filter((report) => report.status === "pending").length > 0 && <span className="inbox-badge">{reports.filter((report) => report.status === "pending").length}</span>}</button><button className="button secondary" onClick={() => { setShowAdminTools(true); setShowLogoForm((current) => !current); }}>🖼️ เปลี่ยนโลโก้</button><button className="button" onClick={() => { setForm(emptyForm); setShowForm(true); }}>＋ เพิ่มที่ฝึกงาน</button><button className="button danger" disabled={clearing} onClick={clearAllData}>{clearing ? "กำลังล้างข้อมูล..." : "ล้างข้อมูลทั้งหมด"}</button></div></div>
+    <section className={`admin-tools ${showAdminTools ? "admin-tools-open" : ""}`}>
+      <button className="admin-tools-toggle" type="button" onClick={() => setShowAdminTools((current) => !current)} aria-expanded={showAdminTools}>
+        <span className="admin-tools-icon" aria-hidden="true">☷</span>
+        <span><strong>เครื่องมือผู้ดูแล</strong><small>จดหมาย โลโก้ มหาวิทยาลัย หน่วยงาน และหมวดหมู่</small></span>
+        <b aria-hidden="true">{showAdminTools ? "−" : "+"}</b>
+      </button>
+      {showAdminTools && <div className="admin-tools-content">
+        <AcademicStructureManager />
     {showInbox && <section className="inbox-panel"><div className="section-heading"><div><h2>กล่องจดหมายแจ้งข้อมูล</h2><p>{reports.filter((report) => report.status === "pending").length} เรื่องที่ยังไม่ได้อ่าน</p></div><select className="select inbox-filter" value={inboxFilter} onChange={(event) => setInboxFilter(event.target.value as "all" | "submission" | "report")}><option value="all">ทั้งหมด</option><option value="submission">เสนอข้อมูล</option><option value="report">แจ้งข้อมูลผิด</option></select></div>{reports.length === 0 && <div className="notice">ยังไม่มีข้อความแจ้งข้อมูล</div>}<div className="inbox-list">{reports.filter((report) => inboxFilter === "all" || report.source === inboxFilter).map((report) => <article className={`inbox-item ${report.status === "pending" ? "unread" : ""} ${report.status === "reviewed" ? "completed" : ""} ${report.status === "dismissed" ? "incorrect" : ""}`} key={`${report.source}-${report.id}`}><button className="inbox-summary" type="button" onClick={() => setOpenReportId((current) => current === report.id ? null : report.id)} aria-expanded={openReportId === report.id}><span><strong>{report.reference}</strong><small>{report.type}</small></span><time>{new Date(report.created_at).toLocaleString("th-TH")}</time><b aria-hidden="true">{openReportId === report.id ? "−" : "+"}</b></button>{openReportId === report.id && <div className="inbox-details"><p className="preserve-lines">{report.details}</p><div className="inbox-actions">{report.status === "pending" && <button className="button secondary" onClick={() => updateReport(report, "reviewed")}>เสร็จแล้ว</button>}{report.status === "reviewed" && <span className="inbox-status completed-label">เสร็จแล้ว</span>}{report.status === "dismissed" && <span className="inbox-status incorrect-label">ข้อมูลผิด</span>}{report.status === "pending" && <button className="button secondary incorrect-action" onClick={() => updateReport(report, "dismissed")}>ข้อมูลผิด</button>}</div></div>}</article>)}</div></section>}
     {showLogoForm && <section className="logo-settings"><div><h2>โลโก้เว็บไซต์</h2><p>เลือกไฟล์ภาพเพื่อเปลี่ยนโลโก้ที่แสดงบนหัวเว็บทุกหน้า (ไม่เกิน 2 MB)</p>{logoUrl && <img className="logo-preview" src={logoUrl} alt="โลโก้ปัจจุบัน" />}</div><div className="logo-upload-actions"><input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={(event) => setLogoFile(event.target.files?.[0])} /><button className="button" type="button" disabled={!logoFile || logoBusy} onClick={saveLogo}>{logoBusy ? "กำลังอัปโหลด..." : "บันทึกโลโก้"}</button></div></section>}
     <section className={`category-settings ${showCategorySettings ? "category-settings-open" : ""}`}><button className="category-settings-toggle" type="button" onClick={() => setShowCategorySettings((current) => !current)} aria-expanded={showCategorySettings}><span><h2>จัดการหมวดหมู่</h2><p>เพิ่ม แก้ไข หรือลบตัวเลือกประเภทหน่วยงานและประเภทกิจการ</p></span><b aria-hidden="true">{showCategorySettings ? "−" : "+"}</b></button>{showCategorySettings && <div className="category-settings-content"><div className="category-add"><select className="select" value={newCategory.categoryType} onChange={(event) => setNewCategory({ ...newCategory, categoryType: event.target.value as Category["category_type"] })}><option value="organization_type">ประเภทหน่วยงาน</option><option value="business_type">ประเภทกิจการ</option></select><input className="input" placeholder="ชื่อหมวดหมู่ใหม่" value={newCategory.name} onChange={(event) => setNewCategory({ ...newCategory, name: event.target.value })} /><button className="button" type="button" onClick={addCategory}>เพิ่มหมวดหมู่</button></div><div className="category-filters"><label className="category-search"><span>ค้นหาหมวดหมู่</span><input className="input" placeholder="พิมพ์ชื่อหมวดหมู่..." value={categorySearch} onChange={(event) => setCategorySearch(event.target.value)} /></label><label className="category-filter"><span>กรองตามประเภท</span><select className="select" value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value as "all" | Category["category_type"])}><option value="all">ทั้งหมด</option><option value="organization_type">ประเภทหน่วยงาน</option><option value="business_type">ประเภทกิจการ</option></select></label></div><div className="category-list">{visibleCategories.map((category) => <div className="category-row" key={category.id}><span className="category-tag">{category.category_type === "organization_type" ? "หน่วยงาน" : "กิจการ"}<b>{category.name}</b></span><div><button className="button secondary" type="button" onClick={() => renameCategory(category)}>แก้ไข</button><button className="button secondary" type="button" onClick={() => removeCategory(category)}>ลบ</button></div></div>)}{visibleCategories.length === 0 && <div className="notice">ไม่พบหมวดหมู่ที่ค้นหา</div>}</div></div>}</section>
+      </div>}
+    </section>
     {message && <div className="notice success-notice" role="status">✓ {message}</div>}{error && <div className="notice" role="alert">{error}</div>}
     {showForm && <form className={`manual-form admin-record-form ${form.id ? "admin-edit-form" : ""}`} onSubmit={submit}>
       <div className="form-heading">
@@ -383,20 +498,26 @@ export default function AdminPage() {
 
       <section className="manual-form-section">
         <h3>สถานที่และช่องทางติดต่อ</h3>
+        <label className="manual-all-universities unknown-location-checkbox"><input type="checkbox" checked={form.unknownLocation} onChange={(event) => setForm((current) => ({
+          ...current,
+          unknownLocation: event.target.checked,
+          ...(event.target.checked ? { address: "", district: "", province: "", latitude: "", longitude: "", googleMapsUrl: "" } : {})
+        }))} /> ไม่ทราบข้อมูลสถานที่ฝึกงาน</label>
         <div className="form-grid">
-          <label className="field full">ที่อยู่<input className="input" value={form.address} onChange={(event) => updateForm("address", event.target.value)} /></label>
-          <label className="field">อำเภอ / เขต<input className="input" value={form.district} onChange={(event) => updateForm("district", event.target.value)} /></label>
+          <label className="field full">ที่อยู่<input className="input" disabled={form.unknownLocation} value={form.address} onChange={(event) => updateForm("address", event.target.value)} /></label>
+          <label className="field">อำเภอ / เขต<input className="input" disabled={form.unknownLocation} value={form.district} onChange={(event) => updateForm("district", event.target.value)} /></label>
           <label className="field">จังหวัด
-            <select className="select" value={form.province} onChange={(event) => updateForm("province", event.target.value)}>
+            <select className="select" disabled={form.unknownLocation} value={form.province} onChange={(event) => updateForm("province", event.target.value)}>
+              <option value="">เลือกจังหวัด</option>
               {!allProvinces.includes(form.province as typeof allProvinces[number]) && <option value={form.province}>{form.province}</option>}
               {allProvinces.map((province) => <option key={province} value={province}>{province}</option>)}
             </select>
           </label>
-          <label className="field">ลิงก์ Google Maps<input className="input" type="url" value={form.googleMapsUrl} onChange={(event) => updateForm("googleMapsUrl", event.target.value)} /></label>
-          <div className="field manual-geocode"><small>วางลิงก์ Google Maps แล้วดึงพิกัดอัตโนมัติ (รองรับลิงก์แชร์แบบสั้น)</small><button type="button" className="button secondary" disabled={geocoding} onClick={geocodeGoogleMapsLink}>{geocoding ? "กำลังอ่านลิงก์..." : "ดึงพิกัดจาก Google Maps"}</button></div>
-          <div className="field manual-geocode"><small>กรอกพิกัดเอง หรือค้นหาจากที่อยู่แล้วตรวจสอบก่อนบันทึก</small><button type="button" className="button secondary" disabled={geocoding} onClick={geocode}>{geocoding ? "กำลังค้นหา..." : "ค้นหาพิกัดจากที่อยู่"}</button></div>
-          <label className="field">Latitude<input className="input" type="number" step="any" min="-90" max="90" placeholder="18.7883" value={form.latitude} onChange={(event) => updateForm("latitude", event.target.value)} /></label>
-          <label className="field">Longitude<input className="input" type="number" step="any" min="-180" max="180" placeholder="98.9853" value={form.longitude} onChange={(event) => updateForm("longitude", event.target.value)} /></label>
+          <label className="field">ลิงก์ Google Maps<input className="input" type="url" disabled={form.unknownLocation} value={form.googleMapsUrl} onChange={(event) => updateForm("googleMapsUrl", event.target.value)} /></label>
+          <div className="field manual-geocode"><small>วางลิงก์ Google Maps เพื่อดึงพิกัด ที่อยู่ อำเภอ และจังหวัด (ตรวจทานก่อนบันทึก)</small><button type="button" className="button secondary" disabled={form.unknownLocation || geocoding || !form.googleMapsUrl.trim()} onClick={geocodeGoogleMapsLink}>{geocoding ? "กำลังอ่านข้อมูล..." : "ดึงข้อมูลจาก Google Maps"}</button></div>
+          <div className="field manual-geocode"><small>กรอกพิกัดเอง หรือค้นหาจากที่อยู่แล้วตรวจสอบก่อนบันทึก</small><button type="button" className="button secondary" disabled={form.unknownLocation || geocoding} onClick={geocode}>{geocoding ? "กำลังค้นหา..." : "ค้นหาพิกัดจากที่อยู่"}</button></div>
+          <label className="field">Latitude<input className="input" disabled={form.unknownLocation} type="number" step="any" min="-90" max="90" placeholder="18.7883" value={form.latitude} onChange={(event) => updateForm("latitude", event.target.value)} /></label>
+          <label className="field">Longitude<input className="input" disabled={form.unknownLocation} type="number" step="any" min="-180" max="180" placeholder="98.9853" value={form.longitude} onChange={(event) => updateForm("longitude", event.target.value)} /></label>
           <label className="field">เว็บไซต์<input className="input" type="url" value={form.website} onChange={(event) => updateForm("website", event.target.value)} /></label>
           <label className="field">Facebook<input className="input" type="url" value={form.facebook} onChange={(event) => updateForm("facebook", event.target.value)} /></label>
           <label className="field">เบอร์โทรศัพท์บริษัท<input className="input" type="tel" value={form.phone} onChange={(event) => updateForm("phone", event.target.value)} /></label>
@@ -433,18 +554,25 @@ export default function AdminPage() {
     </form>}
     <section className="company-panel">
       <div className="section-heading">
-        <div><h2>รายการตำแหน่งงานทั้งหมด</h2><p>{filtered.length} จาก {jobs.length} ตำแหน่งงาน</p></div>
-        <div className="admin-list-filters">
-          <input className="input company-search" placeholder="ค้นหาบริษัทหรือตำแหน่งงาน..." value={query} onChange={(e) => setQuery(e.target.value)} />
-          <select className="select location-filter" aria-label="กรองตามมหาวิทยาลัย" value={universityFilter} onChange={(e) => { setUniversityFilter(e.target.value); setAcademicUnitFilter(""); }}><option value="">ทุกมหาวิทยาลัย</option>{universities.map((university) => <option key={university.id} value={university.id}>{university.name}</option>)}</select>
-          <select className="select location-filter" aria-label="กรองตามคณะ ภาควิชา หรือสาขา" value={academicUnitFilter} onChange={(e) => setAcademicUnitFilter(e.target.value)}><option value="">ทุกคณะ/ภาควิชา/สาขา</option>{academicUnits.filter((unit) => !universityFilter || unit.university_id === universityFilter).map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}</select>
-          <select className="select location-filter" aria-label="กรองตามสถานที่" value={locationFilter} onChange={(e) => setLocationFilter(e.target.value as "all" | "unknown" | "unknownProvince" | "noGoogleMap")}><option value="all">ทุกสถานที่</option><option value="unknown">ไม่ทราบสถานที่</option><option value="unknownProvince">ไม่ทราบจังหวัด</option><option value="noGoogleMap">ไม่มี Google Map</option></select>
-          <select className="select location-filter" aria-label="กรองตามชื่อสถานประกอบการ" value={duplicateNameFilter} onChange={(e) => setDuplicateNameFilter(e.target.value as "all" | "duplicates")}><option value="all">ชื่อทั้งหมด</option><option value="duplicates">ชื่อสถานประกอบการซ้ำ</option></select>
-          <select className="select location-filter" aria-label="กรองตามจังหวัด" value={provinceFilter} onChange={(e) => setProvinceFilter(e.target.value)}><option value="">ทุกจังหวัด</option>{provinces.map((province) => <option key={province} value={province}>{province}</option>)}</select>
-          <button className="button danger duplicate-cleanup-button" type="button" disabled={!duplicateUnknownPositionIds.length || deletingDuplicateUnknown} title="ลบตำแหน่งที่ระบุว่าไม่ระบุและซ้ำภายใต้บริษัทชื่อเดียวกัน" aria-label={`ลบตำแหน่งที่ไม่ระบุซ้ำ ${duplicateUnknownPositionIds.length} รายการ`} onClick={() => removeDuplicateUnknownPositions(duplicateUnknownPositionIds)}>{deletingDuplicateUnknown ? "กำลังลบ..." : `ลบงานซ้ำ (${duplicateUnknownPositionIds.length})`}</button>
+        <div className="company-list-heading"><h2>รายการตำแหน่งงานทั้งหมด</h2><p>{filtered.length} จาก {jobs.length} ตำแหน่งงาน</p></div>
+        <div className="admin-list-toolbar">
+          <div className="admin-list-filters">
+            <input className="input company-search" placeholder="ค้นหาบริษัทหรือตำแหน่งงาน..." value={query} onChange={(e) => setQuery(e.target.value)} />
+            <select className="select location-filter" aria-label="กรองตามมหาวิทยาลัย" value={universityFilter} onChange={(e) => { setUniversityFilter(e.target.value); setAcademicUnitFilter(""); }}><option value="">ทุกมหาวิทยาลัย</option>{universities.map((university) => <option key={university.id} value={university.id}>{university.name}</option>)}</select>
+            <select className="select location-filter" aria-label="กรองตามคณะ ภาควิชา หรือสาขา" value={academicUnitFilter} onChange={(e) => setAcademicUnitFilter(e.target.value)}><option value="">ทุกคณะ/ภาควิชา/สาขา</option>{academicUnits.filter((unit) => !universityFilter || unit.university_id === universityFilter).map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}</select>
+            <select className="select location-filter" aria-label="กรองตามหมวดหมู่งาน" value={jobCategoryFilter} onChange={(e) => setJobCategoryFilter(e.target.value as "all" | "unknown")}><option value="all">ทุกหมวดหมู่งาน</option><option value="unknown">ไม่ทราบหมวดหมู่งาน</option></select>
+            <select className="select location-filter" aria-label="กรองตามสถานที่" value={locationFilter} onChange={(e) => setLocationFilter(e.target.value as "all" | "unknown" | "markedUnknown" | "unknownProvince" | "noGoogleMap")}><option value="all">ทุกสถานที่</option><option value="unknown">ข้อมูลสถานที่ไม่ครบ</option><option value="markedUnknown">{UNKNOWN_LOCATION_LABEL}</option><option value="unknownProvince">ไม่ทราบจังหวัด</option><option value="noGoogleMap">ไม่มี Google Map</option></select>
+            <select className="select location-filter" aria-label="กรองตามชื่อสถานประกอบการ" value={duplicateNameFilter} onChange={(e) => setDuplicateNameFilter(e.target.value as "all" | "duplicates")}><option value="all">ชื่อทั้งหมด</option><option value="duplicates">ชื่อสถานประกอบการซ้ำ</option></select>
+            <select className="select location-filter" aria-label="กรองตามจังหวัด" value={provinceFilter} onChange={(e) => setProvinceFilter(e.target.value)}><option value="">ทุกจังหวัด</option>{provinces.map((province) => <option key={province} value={province}>{province}</option>)}</select>
+          </div>
+          <div className="admin-location-actions" role="group" aria-label="เครื่องมือจัดการตำแหน่งงาน">
+            <button className="button secondary location-backfill-button" type="button" disabled={!autoClassifyCandidates.length || autoClassifying} title="เติมเฉพาะตำแหน่งและหมวดงานที่ยังว่างของประกาศเปิดรับ" onClick={autoClassifyOpenInternships}>{autoClassifying ? "กำลังจัดหมวด..." : `จัดตำแหน่ง/ลักษณะงาน (${autoClassifyCandidates.length})`}</button>
+            <button className="button secondary location-backfill-button" type="button" disabled={!backfillCandidates.length || backfillingLocations} title="ค้นหาพิกัดและเติมเฉพาะข้อมูลตำแหน่งที่ยังว่างจากลิงก์ Google Maps" onClick={backfillGoogleMapsLocations}>{backfillingLocations ? `กำลังดึง ${locationBackfillProgress}` : `เติมข้อมูลจากแผนที่ (${backfillCandidates.length})`}</button>
+            <button className="button danger duplicate-cleanup-button" type="button" disabled={!duplicateUnknownPositionIds.length || deletingDuplicateUnknown} title="ลบตำแหน่งที่ระบุว่าไม่ระบุและซ้ำภายใต้บริษัทชื่อเดียวกัน" aria-label={`ลบตำแหน่งที่ไม่ระบุซ้ำ ${duplicateUnknownPositionIds.length} รายการ`} onClick={() => removeDuplicateUnknownPositions(duplicateUnknownPositionIds)}>{deletingDuplicateUnknown ? "กำลังลบ..." : `ลบงานซ้ำ (${duplicateUnknownPositionIds.length})`}</button>
+          </div>
         </div>
       </div>
-      <div className="company-list">{filtered.map(({ company, internship }) => <article className="company-row" key={internship.id}><div className="company-avatar">{company.name.slice(0, 1)}</div><div className="company-info"><h3>{internship.title}</h3><p>{company.name} · {internship.job_category || "ไม่ระบุลักษณะงาน"} · {company.district || "ไม่ระบุพื้นที่"}</p><small>{internship.academic_units?.universities?.name || "ไม่ระบุมหาวิทยาลัย"} · {internship.academic_units?.name || "ไม่ระบุหน่วยงาน"} · สถานประกอบการ: {company.status} · ประกาศ: {internship.status} · แก้ไขล่าสุด {new Date(internship.updated_at).toLocaleString("th-TH")}</small></div><div className="company-actions"><button className="icon-button edit-icon" onClick={() => edit(company, internship)} aria-label={`แก้ไข ${internship.title}`} title="แก้ไข">✎</button><button className="icon-button delete-icon" disabled={busy} onClick={() => removeInternship(company, internship)} aria-label={`ลบ ${internship.title}`} title="ลบตำแหน่งนี้">🗑</button></div></article>)}</div>{!filtered.length && <div className="notice">ไม่พบตำแหน่งงาน</div>}
+      <div className="company-list">{filtered.map(({ company, internship }) => <article className="company-row" key={internship.id}><div className="company-avatar">{company.name.slice(0, 1)}</div><div className="company-info"><h3>{internship.title}</h3><p>{company.name} · {internship.job_category || "ไม่ระบุลักษณะงาน"} · {company.district || "ไม่ระบุพื้นที่"}</p><small>{internship.academic_units?.universities?.name || "ไม่ระบุมหาวิทยาลัย"} · {internship.academic_units?.name || "ไม่ระบุหน่วยงาน"} · สถานประกอบการ: {company.status} · ประกาศ: {internship.status} · แก้ไขล่าสุด {new Date(internship.updated_at).toLocaleString("th-TH")}</small>{isUnknownLocationMarked(company.address) && <span className="location-unknown-tag">{UNKNOWN_LOCATION_LABEL}</span>}{!isUnknownLocationMarked(company.address) && hasUnknownLocation({ latitude: company.latitude, longitude: company.longitude, address: company.address, district: company.district, province: company.province, googleMapsUrl: company.google_maps_url }) && <span className="location-unknown-tag">ข้อมูลสถานที่ไม่ครบ</span>}</div><div className="company-actions"><button className="icon-button edit-icon" onClick={() => edit(company, internship)} aria-label={`แก้ไข ${internship.title}`} title="แก้ไข">✎</button><button className="icon-button delete-icon" disabled={busy} onClick={() => removeInternship(company, internship)} aria-label={`ลบ ${internship.title}`} title="ลบตำแหน่งนี้">🗑</button></div></article>)}</div>{!filtered.length && <div className="notice">ไม่พบตำแหน่งงาน</div>}
     </section>
     <div className="admin-links"><Link className="button secondary" href="/admin/import">นำเข้า Excel</Link><form action="/api/admin/logout" method="post"><button className="button secondary">ออกจากระบบ</button></form></div>
   </main>;
